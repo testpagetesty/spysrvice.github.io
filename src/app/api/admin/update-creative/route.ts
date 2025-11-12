@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getErrorMessage } from '@/lib/utils'
 
 export async function POST(request: NextRequest) {
   try {
@@ -262,7 +263,7 @@ export async function POST(request: NextRequest) {
 
     if (updateError) {
       console.error('Update error:', updateError)
-      return NextResponse.json({ error: 'Ошибка при обновлении креатива', details: updateError.message }, { status: 500 })
+      return NextResponse.json({ error: 'Ошибка при обновлении креатива', details: getErrorMessage(updateError) }, { status: 500 })
     }
 
     return NextResponse.json({ 
@@ -270,8 +271,8 @@ export async function POST(request: NextRequest) {
       creative: updatedCreative 
     }, { status: 200 })
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('API Error:', error)
-    return NextResponse.json({ error: 'Внутренняя ошибка сервера', details: error.message }, { status: 500 })
+    return NextResponse.json({ error: 'Внутренняя ошибка сервера', details: getErrorMessage(error) }, { status: 500 })
   }
 }

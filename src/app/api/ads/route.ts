@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getErrorMessage } from '@/lib/utils'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     if (error) {
       console.error('Supabase error:', error)
       return NextResponse.json(
-        { error: 'Failed to fetch ad settings', details: error.message },
+        { error: 'Failed to fetch ad settings', details: getErrorMessage(error) },
         { status: 500 }
       )
     }
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Get ads error:', error)
     return NextResponse.json(
-      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
+      { error: 'Internal server error', details: getErrorMessage(error) },
       { status: 500 }
     )
   }

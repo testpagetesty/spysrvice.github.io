@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getErrorMessage } from '@/lib/utils'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
     if (error) {
       console.error('Supabase error:', error)
       return NextResponse.json(
-        { error: 'Failed to fetch ad settings', details: error.message },
+        { error: 'Failed to fetch ad settings', details: getErrorMessage(error) },
         { status: 500 }
       )
     }
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Get ads error:', error)
     return NextResponse.json(
-      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
+      { error: 'Internal server error', details: getErrorMessage(error) },
       { status: 500 }
     )
   }
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
       if (error) {
         console.error('Update error:', error)
         return NextResponse.json(
-          { error: 'Failed to update ad settings', details: error.message },
+          { error: 'Failed to update ad settings', details: getErrorMessage(error) },
           { status: 500 }
         )
       }
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest) {
       if (error) {
         console.error('Insert error:', error)
         return NextResponse.json(
-          { error: 'Failed to create ad settings', details: error.message },
+          { error: 'Failed to create ad settings', details: getErrorMessage(error) },
           { status: 500 }
         )
       }
@@ -126,7 +127,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Save ads error:', error)
     return NextResponse.json(
-      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
+      { error: 'Internal server error', details: getErrorMessage(error) },
       { status: 500 }
     )
   }
@@ -155,7 +156,7 @@ export async function DELETE(request: NextRequest) {
     if (error) {
       console.error('Delete error:', error)
       return NextResponse.json(
-        { error: 'Failed to delete ad settings', details: error.message },
+        { error: 'Failed to delete ad settings', details: getErrorMessage(error) },
         { status: 500 }
       )
     }
@@ -165,7 +166,7 @@ export async function DELETE(request: NextRequest) {
   } catch (error) {
     console.error('Delete ads error:', error)
     return NextResponse.json(
-      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
+      { error: 'Internal server error', details: getErrorMessage(error) },
       { status: 500 }
     )
   }

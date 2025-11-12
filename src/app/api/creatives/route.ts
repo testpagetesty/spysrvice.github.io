@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { getErrorMessage } from '@/lib/utils'
 
 export async function POST(request: NextRequest) {
   try {
@@ -278,6 +279,6 @@ export async function GET() {
       hasKey: !!supabaseServiceKey
     })
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 })
   }
 }
