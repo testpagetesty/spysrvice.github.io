@@ -57,8 +57,8 @@ interface FilterOption {
 }
 
 // Types for date input with showPicker
-interface DateInputWithPicker extends HTMLInputElement {
-  showPicker?: () => void;
+type DateInputWithPicker = HTMLInputElement & {
+  showPicker?: () => void
 }
 
 const ALLOWED_FORMAT_CODES = ['teaser', 'video']

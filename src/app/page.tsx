@@ -31,6 +31,10 @@ interface FilterOption {
   name: string
 }
 
+type DateInputWithPicker = HTMLInputElement & {
+  showPicker?: () => void
+}
+
 const ALLOWED_FORMAT_CODES = ['teaser', 'video']
 const ALLOWED_TYPE_CODES = ['crypt', 'gambling', 'nutra', 'news', 'product', 'nutra_vsl']
 const ALLOWED_PLACEMENT_CODES = ['demand_gen', 'uac']
