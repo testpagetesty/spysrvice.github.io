@@ -38,31 +38,19 @@ export async function POST(request: NextRequest) {
     })
 
     // Получаем ID справочников
-    const countryPromise = countryCode
-      ? supabase.from('countries').select('id, code').eq('code', countryCode).single()
-      : Promise.resolve({ data: null, error: null })
-
-    const [formatRes, typeRes, placementRes, platformRes, countryRes] = await Promise.all([
+    const [formatRes, typeRes, placementRes, platformRes] = await Promise.all([
       supabase.from('formats').select('id').eq('code', formatCode).single(),
       supabase.from('types').select('id').eq('code', typeCode).single(),
       supabase.from('placements').select('id').eq('code', placementCode).single(),
-      supabase.from('platforms').select('id').eq('code', platformCode).single(),
-      countryPromise
+      supabase.from('platforms').select('id').eq('code', platformCode).single()
     ])
 
-    if (
-      formatRes.error ||
-      typeRes.error ||
-      placementRes.error ||
-      platformRes.error ||
-      countryRes?.error
-    ) {
+    if (formatRes.error || typeRes.error || placementRes.error || platformRes.error) {
       console.error('Reference data errors:', {
         format: formatRes.error,
         type: typeRes.error,
         placement: placementRes.error,
-        platform: platformRes.error,
-        country: countryRes?.error
+        platform: platformRes.error
       })
       return NextResponse.json({ error: 'Invalid reference data' }, { status: 400 })
     }
@@ -218,8 +206,7 @@ export async function POST(request: NextRequest) {
       format_id: formatRes.data.id,
       type_id: typeRes.data.id,
       placement_id: placementRes.data.id,
-      country_id: countryRes?.data?.id ?? null,
-      country_code: countryRes?.data?.code ?? countryCode ?? null,
+      country_code: countryCode,
       platform_id: platformRes.data.id,
       cloaking,
       media_url: mediaUrl,
