@@ -18,6 +18,11 @@ interface Creative {
   captured_at: string
   cloaking?: boolean
   media_url?: string
+  thumbnail_url?: string
+  download_url?: string
+  source_link?: string
+  landing_url?: string
+  source_device?: string
   formats?: { name: string }
   types?: { name: string }
   placements?: { name: string }
