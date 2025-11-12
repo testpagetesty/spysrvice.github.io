@@ -23,11 +23,12 @@ interface Creative {
   source_link?: string
   landing_url?: string
   source_device?: string
-  formats?: { name: string }
-  types?: { name: string }
-  placements?: { name: string }
-  countries?: { name: string }
-  platforms?: { name: string }
+  formats?: { name: string; code?: string }
+  types?: { name: string; code?: string }
+  placements?: { name: string; code?: string }
+  countries?: { name: string; code?: string }
+  platforms?: { name: string; code?: string }
+  country_code?: string
 }
 
 interface FilterOption {
