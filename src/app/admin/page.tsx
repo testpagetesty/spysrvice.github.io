@@ -36,7 +36,9 @@ interface Creative {
   media_url?: string
   thumbnail_url?: string
   download_url?: string
+  landing_url?: string
   source_link?: string
+  source_device?: string
   country_code?: string
   status: 'draft' | 'published'
   moderated_at?: string
