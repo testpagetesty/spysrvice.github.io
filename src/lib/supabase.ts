@@ -150,6 +150,7 @@ export const getCountriesWithCounts = async () => {
     .select(`
       code,
       name,
+      created_at,
       creatives(count)
     `)
     .order('name')
@@ -157,9 +158,11 @@ export const getCountriesWithCounts = async () => {
   if (error) throw error
   
   return data?.map(country => ({
-    ...country,
+    code: country.code,
+    name: country.name,
+    created_at: country.created_at,
     count: country.creatives?.[0]?.count || 0
-  }))
+  })) || []
 }
 
 // Функция для админки - получение креативов по статусу

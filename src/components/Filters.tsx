@@ -51,7 +51,9 @@ export default function Filters({ onFiltersChange }: FiltersProps) {
       if (typesRes.data) setTypes(typesRes.data)
       if (placementsRes.data) setPlacements(placementsRes.data)
       if (platformsRes.data) setPlatforms(platformsRes.data)
-      if (countriesRes) setCountries(countriesRes)
+      if (countriesRes && Array.isArray(countriesRes)) {
+        setCountries(countriesRes as CountryWithCount[])
+      }
     } catch (error) {
       console.error('Error loading filter data:', error)
     } finally {
