@@ -51,7 +51,17 @@ export default function Filters({ onFiltersChange }: FiltersProps) {
       if (typesRes.data) setTypes(typesRes.data)
       if (placementsRes.data) setPlacements(placementsRes.data)
       if (platformsRes.data) setPlatforms(platformsRes.data)
-      if (countriesRes) setCountries(countriesRes)
+      if (countriesRes?.data) {
+        const normalizedCountries: CountryWithCount[] = countriesRes.data.map((country) => ({
+          id: country.id,
+          code: country.code,
+          name: country.name,
+          created_at: country.created_at ?? new Date().toISOString(),
+          updated_at: country.updated_at ?? country.created_at ?? new Date().toISOString(),
+          count: country.creatives?.[0]?.count ?? 0
+        }))
+        setCountries(normalizedCountries)
+      }
     } catch (error) {
       console.error('Error loading filter data:', error)
     } finally {
