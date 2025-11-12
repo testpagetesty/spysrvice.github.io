@@ -1471,7 +1471,8 @@ export default function AdminPage() {
                     placement: '',
                     country: '',
                     platform: '',
-                    cloaking: ''
+                    cloaking: '',
+                    status: 'draft'
                   })
                   loadData()
                 }}
