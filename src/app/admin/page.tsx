@@ -978,7 +978,12 @@ export default function AdminPage() {
         media_url: 'https://oilwcbfyhutzyjzlqbuk.supabase.co/storage/v1/object/public/creatives-media/1762886048692-2de5ce8a-1fc7-4166-a1ec-5faef0f3e230.webp',
         thumbnail_url: 'https://oilwcbfyhutzyjzlqbuk.supabase.co/storage/v1/object/public/creatives-media/thumbs/1762886049361-3074abdf-c47a-484e-9f87-8e369ee24cb1.webp',
         download_url: 'https://oilwcbfyhutzyjzlqbuk.supabase.co/storage/v1/object/public/creatives-media/archives/1762886049789-1762882033.zip',
-        source_link: 'https://f5spy.com/viewer/4480/view'
+        source_link: 'https://f5spy.com/viewer/4480/view',
+        landing_url: '',
+        source_device: '',
+        status: 'draft',
+        created_at: '2025-11-11T18:34:10.192+00:00',
+        updated_at: '2025-11-11T18:34:10.192+00:00'
       }
     ])
   }
