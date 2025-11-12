@@ -967,7 +967,9 @@ export default function HomePage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            filterByFormat(selectedCreative.formats!.code)
+                            const code = selectedCreative.formats?.code
+                            if (!code) return
+                            filterByFormat(code)
                           }}
                           className="text-sm text-white underline font-medium hover:opacity-80 transition-opacity"
                         >
@@ -983,7 +985,9 @@ export default function HomePage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            filterByType(selectedCreative.types!.code)
+                            const code = selectedCreative.types?.code
+                            if (!code) return
+                            filterByType(code)
                           }}
                           className="text-sm text-white underline font-medium hover:opacity-80 transition-opacity"
                         >
@@ -999,7 +1003,9 @@ export default function HomePage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            filterByPlacement(selectedCreative.placements!.code)
+                            const code = selectedCreative.placements?.code
+                            if (!code) return
+                            filterByPlacement(code)
                           }}
                           className="text-sm text-white underline font-medium hover:opacity-80 transition-opacity"
                         >
@@ -1031,7 +1037,9 @@ export default function HomePage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            filterByPlatform(selectedCreative.platforms!.code)
+                            const code = selectedCreative.platforms?.code
+                            if (!code) return
+                            filterByPlatform(code)
                           }}
                           className="text-sm text-white underline font-medium hover:opacity-80 transition-opacity"
                         >
