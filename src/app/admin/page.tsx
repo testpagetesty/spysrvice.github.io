@@ -69,6 +69,29 @@ const ALLOWED_PLACEMENT_CODES = ['demand_gen', 'uac']
 const ALLOWED_PLATFORM_CODES = ['web', 'google_play', 'youtube']
 
 export default function AdminPage() {
+  const [isLightTheme, setIsLightTheme] = useState(false)
+  
+  // Простое переключение темы через CSS инверсию
+  const toggleTheme = () => {
+    const newTheme = !isLightTheme
+    setIsLightTheme(newTheme)
+    if (newTheme) {
+      document.documentElement.classList.add('light-theme')
+    } else {
+      document.documentElement.classList.remove('light-theme')
+    }
+    localStorage.setItem('theme', newTheme ? 'light' : 'dark')
+  }
+
+  // Загружаем сохраненную тему при монтировании
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme')
+    if (savedTheme === 'light') {
+      setIsLightTheme(true)
+      document.documentElement.classList.add('light-theme')
+    }
+  }, [])
+
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -1163,13 +1186,31 @@ export default function AdminPage() {
           {/* Top Row - Title and Logout */}
           <div className="flex items-center justify-between py-4 border-b border-gray-800">
             <h1 className="text-2xl font-bold text-white">Admin Panel</h1>
-            <button
-              onClick={handleLogout}
-              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-            >
-              <span>🚪</span>
-              <span>Выйти</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={toggleTheme}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                title={isLightTheme ? 'Переключить на темную тему' : 'Переключить на светлую тему'}
+              >
+                <span>{isLightTheme ? '🌙' : '☀️'}</span>
+                <span>{isLightTheme ? 'Темная' : 'Светлая'}</span>
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                title="Обновить страницу"
+              >
+                <span>🔄</span>
+                <span>Обновить</span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <span>🚪</span>
+                <span>Выйти</span>
+              </button>
+            </div>
           </div>
 
           {/* Navigation Tabs */}

@@ -20,6 +20,18 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Простая инверсия цветов для светлой темы */
+html.light-theme {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+html.light-theme img,
+html.light-theme video,
+html.light-theme iframe,
+html.light-theme [style*="background-image"] {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

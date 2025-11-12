@@ -47,6 +47,29 @@ const ALLOWED_PLACEMENT_CODES = ['demand_gen', 'uac']
 const ALLOWED_PLATFORM_CODES = ['web', 'google_play', 'youtube']
 
 export default function HomePage() {
+  const [isLightTheme, setIsLightTheme] = useState(false)
+  
+  // Простое переключение темы через CSS инверсию
+  const toggleTheme = () => {
+    const newTheme = !isLightTheme
+    setIsLightTheme(newTheme)
+    if (newTheme) {
+      document.documentElement.classList.add('light-theme')
+    } else {
+      document.documentElement.classList.remove('light-theme')
+    }
+    localStorage.setItem('theme', newTheme ? 'light' : 'dark')
+  }
+
+  // Загружаем сохраненную тему при монтировании
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme')
+    if (savedTheme === 'light') {
+      setIsLightTheme(true)
+      document.documentElement.classList.add('light-theme')
+    }
+  }, [])
+
   const [loading, setLoading] = useState(true)
   const [creatives, setCreatives] = useState<Creative[]>([])
   const [formats, setFormats] = useState<FilterOption[]>([])
@@ -520,7 +543,22 @@ export default function HomePage() {
             </div>
 
             <div className="flex items-center space-x-4">
-              
+              <button
+                onClick={toggleTheme}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                title={isLightTheme ? 'Switch to dark theme' : 'Switch to light theme'}
+              >
+                <span>{isLightTheme ? '🌙' : '☀️'}</span>
+                <span>{isLightTheme ? 'Dark' : 'Light'}</span>
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                title="Refresh page"
+              >
+                <span>🔄</span>
+                <span>Refresh</span>
+              </button>
               <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                 Sign in
               </button>
