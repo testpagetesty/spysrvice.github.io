@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Spy Service</string>
+    <string name="accessibility_service_description">Spy Service needs accessibility permission to capture creative content from Chrome and YouTube</string>
+    
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="format">Format</string>
+    <string name="type">Type</string>
+    <string name="placement">Placement</string>
+    <string name="country">Country</string>
+    <string name="platform">Platform</string>
+    <string name="cloaking">Cloaking</string>
+    <string name="save_settings">Save Settings</string>
+    <string name="settings_saved">Settings saved successfully</string>
+    <string name="select_option">Select option</string>
+    
+    <!-- Main -->
+    <string name="capture_creative">Capture Creative</string>
+    <string name="capturing">Capturing...</string>
+    <string name="capture_success">Creative captured successfully</string>
+    <string name="capture_error">Error capturing creative</string>
+    
+    <!-- Permissions -->
+    <string name="permission_overlay_title">Overlay Permission Required</string>
+    <string name="permission_overlay_message">Please enable overlay permission to show floating button</string>
+    <string name="permission_accessibility_title">Accessibility Permission Required</string>
+    <string name="permission_accessibility_message">Please enable accessibility service to capture content</string>
+</resources>
