@@ -66,7 +66,7 @@ type DateInputWithPicker = HTMLInputElement & {
 const ALLOWED_FORMAT_CODES = ['teaser', 'video']
 const ALLOWED_TYPE_CODES = ['crypt', 'gambling', 'nutra', 'news', 'product', 'nutra_vsl']
 const ALLOWED_PLACEMENT_CODES = ['demand_gen', 'uac']
-const ALLOWED_PLATFORM_CODES = ['web', 'google_play', 'youtube']
+const ALLOWED_PLATFORM_CODES = ['web', 'google_play', 'youtube', 'discovery']
 
 export default function AdminPage() {
   const [isLightTheme, setIsLightTheme] = useState(false)
@@ -934,11 +934,12 @@ export default function AdminPage() {
         countriesRes.json()
       ])
 
-      // Filter allowed options
+      // Filter allowed options (только для formats, types, placements)
       setFormats(formatsData.filter((f: FilterOption) => ALLOWED_FORMAT_CODES.includes(f.code)))
       setTypes(typesData.filter((t: FilterOption) => ALLOWED_TYPE_CODES.includes(t.code)))
       setPlacements(placementsData.filter((p: FilterOption) => ALLOWED_PLACEMENT_CODES.includes(p.code)))
-      setPlatforms(platformsData.filter((p: FilterOption) => ALLOWED_PLATFORM_CODES.includes(p.code)))
+      // Показываем все платформы из базы данных без фильтрации
+      setPlatforms(platformsData)
       setCountries(countriesData.map((c: any) => ({ id: c.code, code: c.code, name: c.name })))
 
       // Load creatives (will be filtered by applyFilters)

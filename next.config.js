@@ -11,6 +11,19 @@ const nextConfig = {
       },
     ],
   },
+  // Увеличиваем лимит размера тела запроса для API routes
+  // Supabase Storage поддерживает файлы до 50MB, поэтому увеличиваем лимит
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb', // 50MB лимит для поддержки больших файлов
+    },
+  },
+  // Для App Router используем экспериментальную конфигурацию
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '50mb', // 50MB для server actions
+    },
+  },
 }
 
 module.exports = nextConfig

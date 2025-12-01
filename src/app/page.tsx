@@ -44,7 +44,7 @@ type DateInputWithPicker = HTMLInputElement & {
 const ALLOWED_FORMAT_CODES = ['teaser', 'video']
 const ALLOWED_TYPE_CODES = ['crypt', 'gambling', 'nutra', 'news', 'product', 'nutra_vsl']
 const ALLOWED_PLACEMENT_CODES = ['demand_gen', 'uac']
-const ALLOWED_PLATFORM_CODES = ['web', 'google_play', 'youtube']
+const ALLOWED_PLATFORM_CODES = ['web', 'google_play', 'youtube', 'discovery']
 
 export default function HomePage() {
   const [isLightTheme, setIsLightTheme] = useState(false)
@@ -299,7 +299,8 @@ export default function HomePage() {
       }
       if (platformsRes.ok) {
         const data = (await platformsRes.json()) as FilterOption[]
-        setPlatforms(data.filter(item => ALLOWED_PLATFORM_CODES.includes(item.code)))
+        // Показываем все платформы из базы данных без фильтрации
+        setPlatforms(data)
       }
       if (countriesRes.ok) setCountries(await countriesRes.json())
 
@@ -412,7 +413,8 @@ export default function HomePage() {
         if (filters.type && filters.type !== 'crypt') filtered = []
         if (filters.placement && filters.placement !== 'demand_gen') filtered = []
         if (filters.country && filters.country !== 'AR') filtered = []
-        if (filters.platform && filters.platform !== 'web') filtered = []
+        // Убрана фильтрация по платформе - показываем все креативы
+        // if (filters.platform && filters.platform !== 'web') filtered = []
         if (filters.cloaking) {
           const cloakingFilter = filters.cloaking === 'true'
           if (filtered[0]?.cloaking !== cloakingFilter) filtered = []

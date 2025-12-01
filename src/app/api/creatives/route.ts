@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getErrorMessage } from '@/lib/utils'
 
+// Для App Router лимиты настраиваются в next.config.js
+export const runtime = 'nodejs'
+export const maxDuration = 60 // 60 секунд максимум
+
 export async function POST(request: NextRequest) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
