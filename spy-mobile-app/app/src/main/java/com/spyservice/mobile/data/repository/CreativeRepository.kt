@@ -274,123 +274,74 @@ class CreativeRepository(
             // Отправляем URL файла как текстовое поле
             val downloadUrlBody = downloadUrl?.toRequestBody(null)
             
-            // Повтор при ошибке соединения (максимум 3 попытки)
-            var lastException: Exception? = null
-            var attempts = 0
-            val maxAttempts = 3
-            var response: retrofit2.Response<com.spyservice.mobile.data.model.CreativeResponse>? = null
+            InAppLogger.d(Logger.Tags.REPOSITORY, "📤 Отправляем данные на сервер: landingUrl=${capturedCreative.landingUrl}, downloadUrl=$downloadUrl")
             
-            InAppLogger.d(Logger.Tags.REPOSITORY, "📤 Начинаем отправку на сервер (URL: ${capturedCreative.landingUrl})...")
-            
-            // Используем withTimeout для предотвращения зависания
-            while (attempts < maxAttempts && response == null) {
-                attempts++
-                InAppLogger.d(Logger.Tags.REPOSITORY, "🔄 Попытка $attempts/$maxAttempts отправки на сервер...")
-                try {
-                    InAppLogger.d(Logger.Tags.REPOSITORY, "📡 Вызов API createCreative...")
-                    InAppLogger.d(Logger.Tags.REPOSITORY, "📤 Отправляемые данные: landingUrl=${capturedCreative.landingUrl}, downloadUrl=$downloadUrl")
-                    
-                    // Ждем ответа от сервера без ограничения по времени (таймауты настроены в OkHttpClient)
-                    response = api.createCreative(
-                        title = titleBody,
-                        description = descriptionBody,
-                        format = formatBody,
-                        type = typeBody,
-                        placement = placementBody,
-                        country = countryBody,
-                        platform = platformBody,
-                        cloaking = cloakingBody,
-                        landingUrl = landingUrlBody,
-                        sourceLink = sourceLinkBody,
-                        sourceDevice = sourceDeviceBody,
-                        capturedAt = capturedAtBody,
-                        downloadUrl = downloadUrlBody, // URL файла из Supabase Storage
-                        mediaFile = mediaFile,
-                        thumbnailFile = thumbnailFile
-                    )
-                    
-                    // Логируем детали ответа
-                    val responseCode = response.code()
-                    val responseMessage = response.message()
-                    val contentType = response.headers()["Content-Type"] ?: "unknown"
-                    
-                    InAppLogger.d(Logger.Tags.REPOSITORY, "📥 Ответ сервера: код=$responseCode, сообщение=$responseMessage, Content-Type=$contentType")
-                    
-                    if (response.isSuccessful) {
-                        InAppLogger.success(Logger.Tags.REPOSITORY, "✅ Получен успешный ответ от сервера (код $responseCode)")
-                        // Response body будет автоматически распарсен Retrofit через GsonConverterFactory
-                        // Детальное логирование response body выполняется через HttpLoggingInterceptor (уровень BODY)
+            try {
+                val response = api.createCreative(
+                    title = titleBody,
+                    description = descriptionBody,
+                    format = formatBody,
+                    type = typeBody,
+                    placement = placementBody,
+                    country = countryBody,
+                    platform = platformBody,
+                    cloaking = cloakingBody,
+                    landingUrl = landingUrlBody,
+                    sourceLink = sourceLinkBody,
+                    sourceDevice = sourceDeviceBody,
+                    capturedAt = capturedAtBody,
+                    downloadUrl = downloadUrlBody,
+                    mediaFile = mediaFile,
+                    thumbnailFile = thumbnailFile
+                )
+                
+                val responseCode = response.code()
+                val contentType = response.headers()["Content-Type"] ?: "unknown"
+                
+                InAppLogger.d(Logger.Tags.REPOSITORY, "📥 Ответ сервера: код=$responseCode, Content-Type=$contentType")
+                
+                if (response.isSuccessful) {
+                    val responseBody = response.body()
+                    if (responseBody != null) {
+                        InAppLogger.success(Logger.Tags.REPOSITORY, "✅ Креатив успешно создан. ID: ${responseBody.creative?.id}, download_url: ${responseBody.urls?.downloadUrl?.take(50)}...")
+                        return@withContext true
                     } else {
-                        // Для ошибок читаем errorBody
-                        val errorBodyString = try {
-                            response.errorBody()?.string() ?: "empty error body"
-                        } catch (e: Exception) {
-                            "error reading error body: ${e.message}"
-                        }
-                        InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка сервера: код=$responseCode, тело: $errorBodyString")
-                    }
-                    
-                    break
-                } catch (e: Exception) {
-                    lastException = e
-                    val errorMessage = e.message ?: ""
-                    
-                    // Проверяем, является ли это ошибкой парсинга JSON
-                    val isJsonError = e.message?.contains("MalformedJsonException", ignoreCase = true) == true ||
-                                    e.message?.contains("JsonReader", ignoreCase = true) == true ||
-                                    e is com.google.gson.JsonSyntaxException ||
-                                    e is com.google.gson.stream.MalformedJsonException
-                    
-                    if (isJsonError) {
-                        // Пытаемся получить raw ответ от сервера
-                        try {
-                            val rawResponse = response
-                            if (rawResponse != null) {
-                                val errorBody = rawResponse.errorBody()?.string() ?: "empty"
-                                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка парсинга JSON. Код ответа: ${rawResponse.code()}, тело: $errorBody")
-                            }
-                        } catch (ex: Exception) {
-                            InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Не удалось прочитать ответ сервера: ${ex.message}")
-                        }
-                    }
-                    
-                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка при попытке $attempts: ${e.javaClass.simpleName} - ${e.message}", e)
-                    
-                    val isConnectionError = errorMessage.contains("connection closed", ignoreCase = true) ||
-                                         errorMessage.contains("socket closed", ignoreCase = true) ||
-                                         errorMessage.contains("connection reset", ignoreCase = true) ||
-                                         errorMessage.contains("failed to connect", ignoreCase = true) ||
-                                         errorMessage.contains("timeout", ignoreCase = true) ||
-                                         e is java.net.SocketException ||
-                                         e is java.net.SocketTimeoutException ||
-                                         e is java.io.IOException
-                    
-                    // Если это ошибка JSON и не последняя попытка, повторяем
-                    if ((isConnectionError || isJsonError) && attempts < maxAttempts) {
-                        val delayMs = (attempts * 2000).toLong()
-                        InAppLogger.d(Logger.Tags.REPOSITORY, "⏳ Ошибка ${if (isJsonError) "парсинга JSON" else "соединения"}, повтор через ${delayMs}ms...")
-                        kotlinx.coroutines.delay(delayMs)
-                    } else {
-                        InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Критическая ошибка при вызове API: ${e.message}", e)
-                        e.printStackTrace()
+                        InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Response body is null при успешном коде $responseCode")
                         return@withContext false
                     }
+                } else {
+                    // Читаем errorBody для диагностики
+                    val errorBody = try {
+                        response.errorBody()?.string() ?: "empty"
+                    } catch (e: Exception) {
+                        "error reading error body: ${e.message}"
+                    }
+                    
+                    // Проверяем, не является ли ответ HTML страницей ошибки
+                    if (errorBody.contains("<!DOCTYPE") || errorBody.contains("<html")) {
+                        InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Сервер вернул HTML вместо JSON! Это может быть страница ошибки Vercel.")
+                        InAppLogger.e(Logger.Tags.REPOSITORY, "❌ HTML ответ (первые 500 символов): ${errorBody.take(500)}")
+                    } else {
+                        InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка сервера: код=$responseCode, тело: ${errorBody.take(500)}")
+                    }
+                    return@withContext false
                 }
-            }
-            
-            if (response == null) {
-                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Не удалось отправить данные после $maxAttempts попыток")
+            } catch (e: com.google.gson.JsonSyntaxException) {
+                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка парсинга JSON: сервер вернул не JSON. ${e.message}")
+                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Это означает что сервер вернул строку или HTML вместо JSON объекта")
+                return@withContext false
+            } catch (e: java.lang.IllegalStateException) {
+                if (e.message?.contains("Expected BEGIN_OBJECT") == true) {
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Сервер вернул строку вместо JSON объекта: ${e.message}")
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Это может быть HTML страница ошибки или текстовая ошибка")
+                } else {
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ IllegalStateException: ${e.message}", e)
+                }
+                return@withContext false
+            } catch (e: Exception) {
+                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка при отправке: ${e.javaClass.simpleName} - ${e.message}", e)
                 return@withContext false
             }
-            
-            if (!response.isSuccessful) {
-                val errorBody = response.errorBody()?.string()
-                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка сервера: код=${response.code()}, сообщение=${response.message()}, тело: $errorBody")
-                return@withContext false
-            }
-            
-            InAppLogger.success(Logger.Tags.REPOSITORY, "✅ Креатив успешно отправлен на сервер")
-            true
             } catch (e: kotlinx.coroutines.CancellationException) {
                 InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Загрузка отменена: ${e.message}", e)
                 false
