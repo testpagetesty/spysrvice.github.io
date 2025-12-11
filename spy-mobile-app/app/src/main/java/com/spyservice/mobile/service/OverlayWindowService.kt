@@ -277,7 +277,10 @@ class OverlayWindowService : Service() {
                 Logger.step(Logger.Tags.UI, 5, "Starting creative capture")
                 
                 // Захватить креатив и сохранить локально
-                val captureResult = app.creativeRepository.captureCreative()
+                // ВАЖНО: Используем withContext(Dispatchers.IO) чтобы предотвратить отмену корутины
+                val captureResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    app.creativeRepository.captureCreative()
+                }
                 
                 InAppLogger.step(Logger.Tags.UI, 3, "Capture result: ${captureResult?.javaClass?.simpleName}")
                 Logger.checkpoint(Logger.Tags.UI, "CAPTURE_COMPLETE", mapOf(
@@ -323,11 +326,20 @@ class OverlayWindowService : Service() {
                         android.util.Log.d("OverlayWindowService", "app.creativeRepository: ${app.creativeRepository}")
                         
                         try {
-                            serviceScope.launch {
+                            serviceScope.launch(kotlinx.coroutines.NonCancellable) {
                                 try {
                                     android.util.Log.d("OverlayWindowService", "✅ serviceScope.launch выполнен, начало отправки на сервер...")
                                     InAppLogger.d(Logger.Tags.UI, "Вызов uploadCapturedCreativeDirect...")
                                     android.util.Log.d("OverlayWindowService", "Вызов app.creativeRepository.uploadCapturedCreativeDirect...")
+                                    
+                                    // Проверяем что файл действительно выбран перед загрузкой
+                                    if (creative.pageArchiveFile == null || !creative.pageArchiveFile!!.exists()) {
+                                        InAppLogger.e(Logger.Tags.UI, "❌ Файл архива не выбран или не существует перед загрузкой")
+                                        android.util.Log.e("OverlayWindowService", "❌ Файл архива не выбран или не существует")
+                                        return@launch
+                                    }
+                                    
+                                    InAppLogger.d(Logger.Tags.UI, "📤 Файл архива найден: ${creative.pageArchiveFile!!.name} (${creative.pageArchiveFile!!.length()} bytes)")
                                     
                                     // Используем прямой вызов uploadCapturedCreative с уже захваченным креативом
                                     val uploadSuccess = app.creativeRepository.uploadCapturedCreativeDirect(creative, settings)
@@ -414,9 +426,10 @@ class OverlayWindowService : Service() {
             }
             
             // Инициализировать в репозитории
+            // Activity не передаем - OverlayWindowService не является Activity
             app.creativeRepository.initializeCaptureServices(
                 accessibilityService,
-                screenshotService
+                null
             )
             
             Log.d(TAG, "Capture services initialized")

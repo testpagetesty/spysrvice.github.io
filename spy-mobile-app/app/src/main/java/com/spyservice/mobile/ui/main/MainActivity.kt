@@ -200,6 +200,13 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         
+        // Обработка результата выбора файла из файлового менеджера
+        if (requestCode == com.spyservice.mobile.service.CreativeCaptureService.REQUEST_CODE_FILE_PICKER) {
+            val app = application as? SpyServiceApplication
+            app?.creativeRepository?.getCaptureService()?.handleFilePickerResult(requestCode, resultCode, data)
+            return
+        }
+        
         if (requestCode == ScreenshotService.REQUEST_MEDIA_PROJECTION) {
             android.util.Log.d("MainActivity", "MediaProjection permission result: $resultCode")
             screenshotService?.initializeMediaProjection(resultCode, data)
@@ -264,7 +271,8 @@ class MainActivity : AppCompatActivity() {
             val isAccessibilityEnabled = isAccessibilityServiceEnabled()
             val accessibilityService = CreativeAccessibilityService.getInstance()
             val currentScreenshotService = this.screenshotService ?: ScreenshotService(this)
-            app.creativeRepository.initializeCaptureServices(accessibilityService, currentScreenshotService)
+            // Передаем this (MainActivity) для открытия файлового менеджера
+            app.creativeRepository.initializeCaptureServices(accessibilityService, this)
         }
     }
     

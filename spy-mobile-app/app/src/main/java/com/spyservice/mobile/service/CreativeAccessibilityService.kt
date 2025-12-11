@@ -8,6 +8,8 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.spyservice.mobile.utils.InAppLogger
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -18,8 +20,30 @@ class CreativeAccessibilityService : AccessibilityService() {
     
     companion object {
         private const val TAG = "CreativeAccessibilityService"
-        private const val CHROME_PACKAGE = "com.android.chrome"
-        private const val YOUTUBE_PACKAGE = "com.google.android.youtube"
+        
+        // Список поддерживаемых браузеров
+        private val SUPPORTED_BROWSERS = setOf(
+            "com.android.chrome",              // Chrome
+            "com.chrome.browser",              // Chrome альтернативный
+            "com.chrome.dev",                  // Chrome Dev
+            "com.chrome.canary",               // Chrome Canary
+            "com.google.android.apps.chrome",  // Chrome системный
+            "org.mozilla.firefox",             // Firefox
+            "org.mozilla.fennec_fdroid",       // Firefox F-Droid
+            "com.microsoft.emmx",               // Edge
+            "com.opera.browser",               // Opera
+            "com.opera.mini.native",           // Opera Mini
+            "com.brave.browser",               // Brave
+            "com.vivaldi.browser",             // Vivaldi
+            "com.samsung.android.sbrowser",    // Samsung Internet
+            "com.mi.globalbrowser",            // Mi Browser
+            "com.huawei.browser",              // Huawei Browser
+            "com.sec.android.app.sbrowser",    // Samsung Browser
+            "com.uc.browser.en",               // UC Browser
+            "com.baidu.browser.apps",          // Baidu Browser
+            "com.yandex.browser",              // Yandex Browser
+            "com.google.android.youtube"       // YouTube (для рекламы)
+        )
         
         @Volatile
         private var instance: CreativeAccessibilityService? = null
@@ -48,14 +72,30 @@ class CreativeAccessibilityService : AccessibilityService() {
         if (event == null) return
         
         val packageName = event.packageName?.toString()
-        if (packageName != CHROME_PACKAGE && packageName != YOUTUBE_PACKAGE) {
+        
+        // Проверяем поддерживаемые браузеры
+        if (packageName == null || !SUPPORTED_BROWSERS.contains(packageName)) {
             return
         }
         
+        // Обрабатываем события изменения страницы
         when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                // Страница изменилась - обновляем данные
                 extractPageData()
+            }
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                // Контент страницы изменился - обновляем URL если нужно
+                // Не обновляем слишком часто, чтобы не перегружать систему
+                if (currentUrl.isNullOrEmpty()) {
+                    extractPageData()
+                }
+            }
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+                // Текст выделен - может быть URL в адресной строке
+                if (currentUrl.isNullOrEmpty()) {
+                    extractPageData()
+                }
             }
         }
     }
@@ -64,15 +104,42 @@ class CreativeAccessibilityService : AccessibilityService() {
     }
     
     /**
-     * Получить текущий URL
+     * Получить текущий URL с повторными попытками
      */
-    suspend fun getCurrentUrl(): String? = suspendCancellableCoroutine { continuation ->
+    suspend fun getCurrentUrl(): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
-            extractPageData()
-            continuation.resume(currentUrl)
+            var url: String? = null
+            var attempts = 0
+            val maxAttempts = 5
+            val delayMs = 300L
+            
+            // Пробуем несколько раз с задержками
+            while (attempts < maxAttempts && url.isNullOrEmpty()) {
+                extractPageData()
+                url = currentUrl
+                
+                if (url.isNullOrEmpty()) {
+                    attempts++
+                    if (attempts < maxAttempts) {
+                        delay(delayMs)
+                    }
+                }
+            }
+            
+            // Логируем результат
+            if (url.isNullOrEmpty()) {
+                InAppLogger.w("AccessibilityService", "⚠️ URL не извлечен после $maxAttempts попыток")
+                Log.w(TAG, "Failed to extract URL after $maxAttempts attempts")
+            } else {
+                InAppLogger.d("AccessibilityService", "✅ URL извлечен: ${url.take(80)}...")
+                Log.d(TAG, "URL extracted: $url")
+            }
+            
+            url
         } catch (e: Exception) {
             Log.e(TAG, "Error getting current URL", e)
-            continuation.resume(null)
+            InAppLogger.e("AccessibilityService", "❌ Ошибка получения URL: ${e.message}", e)
+            null
         }
     }
     
@@ -135,52 +202,198 @@ class CreativeAccessibilityService : AccessibilityService() {
      */
     private fun extractPageData() {
         try {
-            val rootNode = rootInActiveWindow ?: return
+            val rootNode = rootInActiveWindow ?: run {
+                Log.w(TAG, "rootInActiveWindow is null")
+                return
+            }
             
-            // Извлечь URL из адресной строки
-            currentUrl = extractUrlFromAddressBar(rootNode)
+            // Извлечь URL из адресной строки (приоритет)
+            val extractedUrl = extractUrlFromAddressBar(rootNode)
+            if (!extractedUrl.isNullOrEmpty()) {
+                currentUrl = extractedUrl
+                InAppLogger.d("AccessibilityService", "📋 URL обновлен: ${currentUrl?.take(80)}...")
+            } else {
+                // Если URL не найден, но был ранее - сохраняем старый
+                if (currentUrl.isNullOrEmpty()) {
+                    InAppLogger.w("AccessibilityService", "⚠️ URL не найден в адресной строке")
+                }
+            }
             
             // Извлечь заголовок страницы
-            pageTitle = extractPageTitle(rootNode)
+            val extractedTitle = extractPageTitle(rootNode)
+            if (!extractedTitle.isNullOrEmpty()) {
+                pageTitle = extractedTitle
+            }
             
             // Извлечь описание
-            pageDescription = extractPageDescription(rootNode)
+            val extractedDesc = extractPageDescription(rootNode)
+            if (!extractedDesc.isNullOrEmpty()) {
+                pageDescription = extractedDesc
+            }
             
             // Найти ссылки на объявления
             adLinks = extractAdLinks(rootNode)
             
-            Log.d(TAG, "Extracted data - URL: $currentUrl, Title: $pageTitle")
+            Log.d(TAG, "Extracted data - URL: ${currentUrl?.take(100)}, Title: ${pageTitle?.take(50)}")
             
         } catch (e: Exception) {
             Log.e(TAG, "Error extracting page data", e)
+            InAppLogger.e("AccessibilityService", "❌ Ошибка извлечения данных страницы: ${e.message}", e)
         }
     }
     
     /**
-     * Извлечь URL из адресной строки
+     * Извлечь URL из адресной строки (улучшенная версия с поддержкой разных браузеров)
      */
     private fun extractUrlFromAddressBar(rootNode: AccessibilityNodeInfo): String? {
-        val addressBarNodes = rootNode.findAccessibilityNodeInfosByViewId("com.android.chrome:id/url_bar")
-        if (addressBarNodes.isNotEmpty()) {
-            val rawUrl = addressBarNodes[0].text?.toString()
-            addressBarNodes.forEach { it.recycle() }
-            
-            if (!rawUrl.isNullOrEmpty()) {
-                return cleanUrl(rawUrl)
+        // Список возможных ID адресной строки для разных браузеров и версий
+        val addressBarIds = listOf(
+            "com.android.chrome:id/url_bar",           // Chrome стандартный
+            "com.chrome.browser:id/url_bar",           // Chrome альтернативный
+            "com.android.chrome:id/omnibox_text_view", // Chrome omnibox
+            "com.android.chrome:id/location_bar",       // Chrome location bar
+            "org.mozilla.firefox:id/mozac_browser_toolbar_url_view", // Firefox
+            "com.microsoft.emmx:id/url_bar",          // Edge
+            "com.opera.browser:id/url_field",          // Opera
+            "com.brave.browser:id/url_bar",            // Brave
+            "com.vivaldi.browser:id/url_bar"            // Vivaldi
+        )
+        
+        // Пробуем найти URL по известным ID
+        for (addressBarId in addressBarIds) {
+            try {
+                val addressBarNodes = rootNode.findAccessibilityNodeInfosByViewId(addressBarId)
+                if (addressBarNodes.isNotEmpty()) {
+                    val rawUrl = addressBarNodes[0].text?.toString()
+                    addressBarNodes.forEach { it.recycle() }
+                    
+                    if (!rawUrl.isNullOrEmpty()) {
+                        val cleaned = cleanUrl(rawUrl)
+                        if (cleaned != null) {
+                            InAppLogger.d("AccessibilityService", "✅ URL найден через ID: $addressBarId")
+                            return cleaned
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Игнорируем ошибки для конкретного ID
             }
         }
         
-        val omniboxNodes = rootNode.findAccessibilityNodeInfosByViewId("com.android.chrome:id/omnibox_results_container")
-        if (omniboxNodes.isNotEmpty()) {
-            val rawUrl = omniboxNodes[0].text?.toString()
-            omniboxNodes.forEach { it.recycle() }
-            
-            if (!rawUrl.isNullOrEmpty()) {
-                return cleanUrl(rawUrl)
-            }
+        // Альтернативный способ: поиск по тексту "http" или "https"
+        val urlFromText = findUrlByText(rootNode)
+        if (urlFromText != null) {
+            InAppLogger.d("AccessibilityService", "✅ URL найден через поиск по тексту")
+            return urlFromText
         }
         
+        // Поиск в contentDescription
+        val urlFromContentDesc = findUrlByContentDescription(rootNode)
+        if (urlFromContentDesc != null) {
+            InAppLogger.d("AccessibilityService", "✅ URL найден через contentDescription")
+            return urlFromContentDesc
+        }
+        
+        // Последняя попытка: поиск во всех узлах
+        InAppLogger.d("AccessibilityService", "🔍 Поиск URL во всех узлах...")
         return findUrlInAllNodes(rootNode)
+    }
+    
+    /**
+     * Найти URL по тексту содержащему "http" или "https"
+     */
+    private fun findUrlByText(rootNode: AccessibilityNodeInfo): String? {
+        try {
+            val allNodes = mutableListOf<AccessibilityNodeInfo>()
+            collectAllNodes(rootNode, allNodes)
+            
+            for (node in allNodes) {
+                val text = node.text?.toString()
+                if (!text.isNullOrEmpty()) {
+                    // Ищем полный URL
+                    val urlMatch = Regex("https?://[^\\s]+").find(text)
+                    if (urlMatch != null) {
+                        val url = urlMatch.value.trim()
+                        if (isValidUrl(url)) {
+                            allNodes.forEach { it.recycle() }
+                            return url
+                        }
+                    }
+                    
+                    // Ищем домен без схемы
+                    val domainMatch = Regex("(www\\.)?[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(/[^\\s]*)?").find(text)
+                    if (domainMatch != null) {
+                        val domain = domainMatch.value.trim()
+                        val cleaned = cleanUrl(domain)
+                        if (cleaned != null && isValidUrl(cleaned)) {
+                            allNodes.forEach { it.recycle() }
+                            return cleaned
+                        }
+                    }
+                }
+            }
+            
+            allNodes.forEach { it.recycle() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error finding URL by text", e)
+        }
+        
+        return null
+    }
+    
+    /**
+     * Найти URL в contentDescription
+     */
+    private fun findUrlByContentDescription(rootNode: AccessibilityNodeInfo): String? {
+        try {
+            val allNodes = mutableListOf<AccessibilityNodeInfo>()
+            collectAllNodes(rootNode, allNodes)
+            
+            for (node in allNodes) {
+                val contentDesc = node.contentDescription?.toString()
+                if (!contentDesc.isNullOrEmpty()) {
+                    val urlMatch = Regex("https?://[^\\s]+").find(contentDesc)
+                    if (urlMatch != null) {
+                        val url = urlMatch.value.trim()
+                        if (isValidUrl(url)) {
+                            allNodes.forEach { it.recycle() }
+                            return url
+                        }
+                    }
+                }
+            }
+            
+            allNodes.forEach { it.recycle() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error finding URL by contentDescription", e)
+        }
+        
+        return null
+    }
+    
+    /**
+     * Собрать все узлы в список
+     */
+    private fun collectAllNodes(node: AccessibilityNodeInfo, list: MutableList<AccessibilityNodeInfo>) {
+        list.add(node)
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                collectAllNodes(child, list)
+            }
+        }
+    }
+    
+    /**
+     * Проверить валидность URL
+     */
+    private fun isValidUrl(url: String): Boolean {
+        return try {
+            android.net.Uri.parse(url)
+            url.startsWith("http://") || url.startsWith("https://")
+        } catch (e: Exception) {
+            false
+        }
     }
     
     /**
@@ -781,6 +994,457 @@ class CreativeAccessibilityService : AccessibilityService() {
             true
         } catch (e: Exception) {
             Log.e(TAG, "Error scrolling to top", e)
+            false
+        }
+    }
+    
+    /**
+     * Открыть меню Chrome через AccessibilityService
+     * Поиск кнопки меню осуществляется по ID (независимо от языка)
+     */
+    fun openChromeMenu(): Boolean {
+        return try {
+            val rootNode = rootInActiveWindow ?: return false
+            
+            // Возможные ID для кнопки меню Chrome (трехточечное меню)
+            val menuButtonIds = listOf(
+                "com.android.chrome:id/menu_button",
+                "com.android.chrome:id/toolbar_menu_button",
+                "com.android.chrome:id/menu_anchor",
+                "com.chrome.browser:id/menu_button",
+                "com.chrome.browser:id/toolbar_menu_button"
+            )
+            
+            // Ищем кнопку меню по ID
+            for (menuId in menuButtonIds) {
+                try {
+                    val menuNodes = rootNode.findAccessibilityNodeInfosByViewId(menuId)
+                    if (menuNodes.isNotEmpty()) {
+                        val menuNode = menuNodes[0]
+                        if (menuNode.isClickable) {
+                            val success = menuNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            menuNodes.forEach { it.recycle() }
+                            rootNode.recycle()
+                            
+                            if (success) {
+                                return true
+                            }
+                        }
+                        menuNodes.forEach { it.recycle() }
+                    }
+                } catch (e: Exception) {
+                    // Продолжаем поиск
+                }
+            }
+            
+            rootNode.recycle()
+            InAppLogger.e("AccessibilityService", "❌ Не удалось найти кнопку меню Chrome по ID")
+            false
+        } catch (e: Exception) {
+            InAppLogger.e("AccessibilityService", "❌ Ошибка открытия меню Chrome: ${e.message}", e)
+            false
+        }
+    }
+    
+    /**
+     * Активировать функцию "Скачать страницу" в Chrome
+     * Использует встроенную функцию Chrome для сохранения страницы (MHTML)
+     * Поиск кнопок осуществляется по ID, а не по тексту (для поддержки разных языков)
+     */
+    suspend fun savePageInChrome(): Boolean {
+        return try {
+            // Открываем меню Chrome
+            delay(500)
+            if (!openChromeMenu()) {
+                InAppLogger.e("AccessibilityService", "❌ Не удалось открыть меню Chrome")
+                return false
+            }
+            
+            delay(3000) // Ждем 3 секунды после открытия меню перед нажатием на кнопку скачивания
+            
+            // Ищем кнопку "Скачать страницу" по ID (независимо от языка)
+            val rootNode = rootInActiveWindow ?: return false
+            
+            // Возможные ID для кнопки "Скачать страницу" в Chrome (только по ID, без текста)
+            // Рабочий ID: com.android.chrome:id/button_three
+            val downloadPageIds = listOf(
+                "com.android.chrome:id/button_three",  // Рабочий ID кнопки "Скачать страницу"
+                "com.android.chrome:id/download_page",
+                "com.android.chrome:id/menu_item_download_page",
+                "com.android.chrome:id/menu_item_download",
+                "com.android.chrome:id/download",
+                "com.android.chrome:id/offline_page",
+                "com.android.chrome:id/save_page",
+                "com.chrome.browser:id/download_page",
+                "com.chrome.browser:id/menu_item_download_page",
+                "com.chrome.browser:id/menu_item_download",
+                "com.chrome.browser:id/download",
+                "com.chrome.browser:id/offline_page",
+                "com.chrome.browser:id/save_page"
+            )
+            
+            // Сначала пробуем найти по ID
+            for (downloadId in downloadPageIds) {
+                try {
+                    val downloadNodes = rootNode.findAccessibilityNodeInfosByViewId(downloadId)
+                    if (downloadNodes.isNotEmpty()) {
+                        val downloadNode = downloadNodes[0]
+                        val isClickable = downloadNode.isClickable
+                        
+                        // Сохраняем данные перед переработкой узлов
+                        if (isClickable) {
+                            // Выполняем действие ДО переработки узлов
+                            val success = downloadNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            
+                            // Перерабатываем узлы после использования
+                            downloadNodes.forEach { it.recycle() }
+                            
+                            if (success) {
+                                // Перерабатываем rootNode только после успешного клика
+                                rootNode.recycle()
+                                delay(1000)
+                                handleDownloadConfirmationDialogs()
+                                return true
+                            }
+                        } else {
+                            // Перерабатываем узлы если не кликабельный
+                            downloadNodes.forEach { it.recycle() }
+                        }
+                    }
+                } catch (e: Exception) {
+                    InAppLogger.e("AccessibilityService", "❌ Ошибка при поиске кнопки по ID $downloadId: ${e.message}")
+                    // Продолжаем поиск
+                }
+            }
+            
+            // Если не нашли по ID, ищем более точно по всем элементам меню
+            val allNodes = mutableListOf<AccessibilityNodeInfo>()
+            collectAllNodes(rootNode, allNodes)
+            
+            // Логируем ВСЕ элементы меню с их ID для отладки (не только кликабельные)
+            InAppLogger.d("AccessibilityService", "📋 Всего элементов в меню: ${allNodes.size}")
+            for (node in allNodes) {
+                try {
+                    val viewId = node.viewIdResourceName
+                    val className = node.className?.toString()
+                    val isClickable = node.isClickable
+                    val text = node.text?.toString()
+                    if (viewId != null) {
+                        InAppLogger.d("AccessibilityService", "📌 Элемент: ID=$viewId, класс=$className, кликабельный=$isClickable, текст='$text'")
+                    }
+                } catch (e: Exception) {
+                    // Игнорируем ошибки при логировании
+                }
+            }
+            
+            // Логируем все кликабельные элементы с их ID для отладки
+            val clickableNodes = allNodes.filter { it.isClickable }
+            InAppLogger.d("AccessibilityService", "🔘 Кликабельных элементов: ${clickableNodes.size}")
+            
+            // Ищем элемент с ID содержащим "download_page" или "download" (но не просто "download" без "page")
+            // Это должно быть именно скачивание страницы, а не обычное скачивание файла
+            var foundNode: AccessibilityNodeInfo? = null
+            var foundViewId: String? = null
+            
+            for (node in clickableNodes) {
+                try {
+                    val viewId = node.viewIdResourceName?.lowercase() ?: ""
+                    // Ищем именно "download_page" или "download" в контексте меню страницы
+                    if ((viewId.contains("download_page") || viewId.contains("menu_item_download")) &&
+                        !viewId.contains("download_manager") && // Исключаем менеджер загрузок
+                        !viewId.contains("download_history")) {  // Исключаем историю загрузок
+                        foundNode = node
+                        foundViewId = node.viewIdResourceName
+                        break
+                    }
+                } catch (e: Exception) {
+                    // Пропускаем проблемные узлы
+                    continue
+                }
+            }
+            
+            if (foundNode != null && foundViewId != null) {
+                try {
+                    InAppLogger.d("AccessibilityService", "✅ Найдена кнопка 'Скачать страницу': ID=$foundViewId")
+                    
+                    val success = foundNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    
+                    // Перерабатываем все узлы после использования
+                    allNodes.forEach { 
+                        try { it.recycle() } catch (e: Exception) { /* Игнорируем ошибки переработки */ }
+                    }
+                    try { rootNode.recycle() } catch (e: Exception) { /* Игнорируем ошибки переработки */ }
+                    
+                    if (success) {
+                        delay(1000)
+                        handleDownloadConfirmationDialogs()
+                        return true
+                    }
+                } catch (e: Exception) {
+                    InAppLogger.e("AccessibilityService", "❌ Ошибка при клике на кнопку: ${e.message}", e)
+                    // Перерабатываем узлы при ошибке
+                    allNodes.forEach { 
+                        try { it.recycle() } catch (ex: Exception) { /* Игнорируем */ }
+                    }
+                    try { rootNode.recycle() } catch (ex: Exception) { /* Игнорируем */ }
+                }
+            }
+            
+            // Если не нашли по точным ID, пробуем найти элемент с ID содержащим "page" и "download" (только по ID, без текста)
+            var pageDownloadNode: AccessibilityNodeInfo? = null
+            var pageDownloadViewId: String? = null
+            
+            for (node in clickableNodes) {
+                try {
+                    val viewId = node.viewIdResourceName?.lowercase() ?: ""
+                    
+                    // Ищем элемент который связан со страницей и скачиванием ТОЛЬКО по ID
+                    if ((viewId.contains("page") && (viewId.contains("download") || viewId.contains("save"))) ||
+                        (viewId.contains("offline") && viewId.contains("page")) ||
+                        (viewId.contains("save") && viewId.contains("page"))) {
+                        pageDownloadNode = node
+                        pageDownloadViewId = node.viewIdResourceName
+                        break
+                    }
+                } catch (e: Exception) {
+                    // Пропускаем проблемные узлы
+                    continue
+                }
+            }
+            
+            if (pageDownloadNode != null && pageDownloadViewId != null) {
+                try {
+                    InAppLogger.d("AccessibilityService", "✅ Найдена кнопка 'Скачать страницу' (поиск по ID паттерну): ID=$pageDownloadViewId")
+                    
+                    val success = pageDownloadNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    
+                    // Перерабатываем все узлы после использования
+                    allNodes.forEach { 
+                        try { it.recycle() } catch (e: Exception) { /* Игнорируем ошибки переработки */ }
+                    }
+                    try { rootNode.recycle() } catch (e: Exception) { /* Игнорируем ошибки переработки */ }
+                    
+                    if (success) {
+                        delay(1000)
+                        handleDownloadConfirmationDialogs()
+                        return true
+                    }
+                } catch (e: Exception) {
+                    InAppLogger.e("AccessibilityService", "❌ Ошибка при клике на кнопку (паттерн): ${e.message}", e)
+                    // Перерабатываем узлы при ошибке
+                    allNodes.forEach { 
+                        try { it.recycle() } catch (ex: Exception) { /* Игнорируем */ }
+                    }
+                    try { rootNode.recycle() } catch (ex: Exception) { /* Игнорируем */ }
+                }
+            }
+            
+            // Логируем все кликабельные элементы с подробной информацией
+            InAppLogger.d("AccessibilityService", "📋 Список всех кликабельных элементов меню:")
+            for ((index, node) in clickableNodes.withIndex()) {
+                try {
+                    val viewId = node.viewIdResourceName
+                    val className = node.className?.toString()
+                    val text = node.text?.toString()
+                    val contentDesc = node.contentDescription?.toString()
+                    val bounds = android.graphics.Rect()
+                    node.getBoundsInScreen(bounds)
+                    
+                    InAppLogger.d("AccessibilityService", "  [$index] ID=$viewId, класс=$className, текст='$text', описание='$contentDesc', координаты=(${bounds.left},${bounds.top})-(${bounds.right},${bounds.bottom})")
+                } catch (e: Exception) {
+                    InAppLogger.d("AccessibilityService", "  [$index] Ошибка при чтении элемента: ${e.message}")
+                }
+            }
+            
+            // Последняя попытка: пробуем найти элемент по позиции в меню
+            // Обычно кнопка "Скачать страницу" находится внизу меню (последний или предпоследний элемент)
+            // Сортируем элементы по Y координате (снизу вверх) и пробуем последние элементы
+            val nodesWithBounds = mutableListOf<Pair<AccessibilityNodeInfo, android.graphics.Rect>>()
+            
+            for (node in clickableNodes) {
+                try {
+                    val bounds = android.graphics.Rect()
+                    node.getBoundsInScreen(bounds)
+                    if (!bounds.isEmpty) {
+                        nodesWithBounds.add(Pair(node, bounds))
+                    }
+                } catch (e: Exception) {
+                    continue
+                }
+            }
+            
+            // Сортируем по Y координате (снизу вверх - последние элементы меню)
+            nodesWithBounds.sortByDescending { it.second.bottom }
+            
+            // Пробуем последние 3 элемента меню (обычно кнопка скачивания внизу)
+            val candidatesToTry = nodesWithBounds.take(3)
+            
+            InAppLogger.d("AccessibilityService", "🔄 Пробуем кликнуть по последним ${candidatesToTry.size} элементам меню (снизу вверх)")
+            
+            for ((index, pair) in candidatesToTry.withIndex()) {
+                val (node, bounds) = pair
+                try {
+                    val viewId = node.viewIdResourceName
+                    val className = node.className?.toString()
+                    InAppLogger.d("AccessibilityService", "  Попытка [$index]: ID=$viewId, класс=$className, координаты=(${bounds.left},${bounds.top})-(${bounds.right},${bounds.bottom})")
+                    
+                    // Пробуем кликнуть по координатам центра элемента (более надежно)
+                    val centerX = bounds.centerX()
+                    val centerY = bounds.centerY()
+                    
+                    // Сначала пробуем обычный клик
+                    var success = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    
+                    // Если не сработало, пробуем через GestureDescription
+                    if (!success) {
+                        try {
+                            val path = android.graphics.Path().apply {
+                                moveTo(centerX.toFloat(), centerY.toFloat())
+                            }
+                            
+                            val gesture = android.accessibilityservice.GestureDescription.Builder()
+                            gesture.addStroke(
+                                android.accessibilityservice.GestureDescription.StrokeDescription(
+                                    path, 0, 100
+                                )
+                            )
+                            
+                            success = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                                    var completed = false
+                                    val callback = object : android.accessibilityservice.AccessibilityService.GestureResultCallback() {
+                                        override fun onCompleted(gestureDescription: android.accessibilityservice.GestureDescription?) {
+                                            if (!completed) {
+                                                completed = true
+                                                continuation.resume(true)
+                                            }
+                                        }
+                                        override fun onCancelled(gestureDescription: android.accessibilityservice.GestureDescription?) {
+                                            if (!completed) {
+                                                completed = true
+                                                continuation.resume(false)
+                                            }
+                                        }
+                                    }
+                                    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                                    dispatchGesture(gesture.build(), callback, handler)
+                                    handler.postDelayed({
+                                        if (!completed) {
+                                            completed = true
+                                            continuation.resume(false)
+                                        }
+                                    }, 1000)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            InAppLogger.e("AccessibilityService", "❌ Ошибка GestureDescription: ${e.message}")
+                        }
+                    }
+                    
+                    if (success) {
+                        InAppLogger.d("AccessibilityService", "✅ Клик выполнен успешно на элементе [$index]")
+                        
+                        // Перерабатываем все узлы после использования
+                        allNodes.forEach { 
+                            try { it.recycle() } catch (e: Exception) { /* Игнорируем ошибки переработки */ }
+                        }
+                        try { rootNode.recycle() } catch (e: Exception) { /* Игнорируем ошибки переработки */ }
+                        
+                        delay(1000)
+                        handleDownloadConfirmationDialogs()
+                        return true
+                    }
+                } catch (e: Exception) {
+                    InAppLogger.e("AccessibilityService", "❌ Ошибка при клике на элемент [$index]: ${e.message}", e)
+                }
+            }
+            
+            // Перерабатываем все узлы перед выходом
+            allNodes.forEach { 
+                try { it.recycle() } catch (e: Exception) { /* Игнорируем ошибки переработки */ }
+            }
+            try { rootNode.recycle() } catch (e: Exception) { /* Игнорируем ошибки переработки */ }
+            
+            InAppLogger.e("AccessibilityService", "❌ Не удалось найти кнопку 'Скачать страницу' в меню Chrome по ID")
+            false
+        } catch (e: Exception) {
+            InAppLogger.e("AccessibilityService", "❌ Ошибка сохранения страницы в Chrome: ${e.message}", e)
+            false
+        }
+    }
+    
+    /**
+     * Обработать диалоги подтверждения скачивания в Chrome
+     * Ищет кнопки подтверждения по ID (независимо от языка)
+     */
+    private suspend fun handleDownloadConfirmationDialogs(): Boolean {
+        return try {
+            var handled = false
+            var attempts = 0
+            val maxAttempts = 5
+            
+            while (!handled && attempts < maxAttempts) {
+                attempts++
+                delay(500)
+                
+                val rootNode = rootInActiveWindow ?: break
+                
+                // Возможные ID для кнопок подтверждения в диалогах Chrome/Android
+                val confirmButtonIds = listOf(
+                    "android:id/button1",  // Обычно это "OK" или положительная кнопка
+                    "android:id/button2",  // Иногда это "OK"
+                    "com.android.chrome:id/positive_button",
+                    "com.android.chrome:id/ok_button",
+                    "com.android.chrome:id/allow_button",
+                    "com.chrome.browser:id/positive_button"
+                )
+                
+                // Сначала пробуем найти по ID
+                for (buttonId in confirmButtonIds) {
+                    try {
+                        val buttonNodes = rootNode.findAccessibilityNodeInfosByViewId(buttonId)
+                        if (buttonNodes.isNotEmpty()) {
+                            val buttonNode = buttonNodes[0]
+                            if (buttonNode.isClickable) {
+                                val success = buttonNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                                buttonNodes.forEach { it.recycle() }
+                                rootNode.recycle()
+                                
+                                if (success) {
+                                    return true
+                                }
+                            }
+                            buttonNodes.forEach { it.recycle() }
+                        }
+                    } catch (e: Exception) {
+                        // Продолжаем поиск
+                    }
+                }
+                
+                // Если не нашли по ID, пробуем найти положительную кнопку по позиции
+                val allNodes = mutableListOf<AccessibilityNodeInfo>()
+                collectAllNodes(rootNode, allNodes)
+                
+                val clickableNodes = allNodes.filter { it.isClickable }
+                // Обычно положительная кнопка (OK/Download) находится справа или внизу
+                val confirmButton = clickableNodes.lastOrNull()
+                
+                if (confirmButton != null) {
+                    val success = confirmButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    allNodes.forEach { it.recycle() }
+                    rootNode.recycle()
+                    
+                    if (success) {
+                        return true
+                    }
+                }
+                
+                allNodes.forEach { it.recycle() }
+                rootNode.recycle()
+            }
+            
+            handled
+        } catch (e: Exception) {
             false
         }
     }

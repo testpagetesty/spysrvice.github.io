@@ -1,169 +1,110 @@
 package com.spyservice.mobile.service
 
 import android.content.Context
-import android.graphics.Bitmap
+import android.provider.MediaStore
+import android.content.ContentUris
+import android.os.Build
+import android.net.Uri
+import android.database.Cursor
 import com.spyservice.mobile.data.model.CapturedCreative
 import com.spyservice.mobile.data.model.CaptureResult
-import com.spyservice.mobile.data.model.PageContent
-import com.spyservice.mobile.data.repository.SettingsRepository
 import com.spyservice.mobile.utils.InAppLogger
 import com.spyservice.mobile.utils.Logger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
 
 /**
  * Сервис для автоматического захвата креативов
+ * Упрощенная версия - только получение URL и передача настроек
  */
 class CreativeCaptureService(
     private val context: Context,
     private val accessibilityService: CreativeAccessibilityService? = null,
-    private val screenshotService: ScreenshotService? = null,
-    private val pageArchiver: PageArchiver? = null,
-    private val pagePreviewService: PagePreviewService? = null
+    private val activity: android.app.Activity? = null // Для открытия файлового менеджера
 ) {
     
     companion object {
         private const val TAG = "CreativeCaptureService"
-        private const val INITIAL_DELAY_MS = 3000L // Начальная задержка для загрузки страницы
-        private const val NAVIGATION_DELAY_MS = 5000L // Задержка после навигации
-        private const val RETRY_DELAY_MS = 2000L // Задержка между попытками
-        private const val MAX_RETRIES = 3 // Максимальное количество попыток
+        const val REQUEST_CODE_FILE_PICKER = 1001
     }
     
     /**
      * Основной метод захвата креатива
+     * Упрощенная версия - только URL и настройки приложения
      */
     suspend fun captureCreative(): CaptureResult = withContext(Dispatchers.IO) {
         try {
+            // Получаем URL из браузера
             val currentUrl = getCurrentUrl()
             if (currentUrl.isNullOrEmpty()) {
-                return@withContext CaptureResult.Error("Cannot get current URL from browser")
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Не удалось извлечь URL из браузера")
+                return@withContext CaptureResult.Error("Cannot get current URL from browser. Make sure you are on a web page and Accessibility Service is enabled.")
             }
             
-            delay(INITIAL_DELAY_MS)
+            // Экспорт страницы через встроенную функцию Chrome
+            val pageArchive = savePageUsingChrome(currentUrl)
             
-            val adLink: String? = null
-            val finalUrl = currentUrl
-            
-            val pageContent = extractPageContent(finalUrl)
-            
-            // ПРИОРИТЕТ: Получаем превью изображение (картинку) для Media Image/Video
-            val previewFile = try {
-                val previewService = pagePreviewService ?: PagePreviewService(context)
-                previewService.getAndSavePreview(finalUrl)
-            } catch (e: Exception) {
-                null
-            }
-            
-            // Захват скриншота всей страницы для thumbnail_file
-            InAppLogger.step(Logger.Tags.SERVICE, 1, "📸 Захват скриншота всей страницы...")
-            val fullPageScreenshot: Bitmap? = try {
-                // УНИВЕРСАЛЬНЫЙ ПОДХОД: Простой захват через View.draw()
-                InAppLogger.d(Logger.Tags.SERVICE, "🔄 Универсальный захват скриншота...")
-                captureUniversalScreenshot(finalUrl)
-            } catch (e: Exception) {
-                InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка захвата скриншота: ${e.message}", e)
-                null
-            }
-            
-            // Сохраняем скриншот в файл
-            val thumbnailFile: File? = if (fullPageScreenshot != null) {
-                try {
-                    InAppLogger.d(Logger.Tags.SERVICE, "💾 Сохранение скриншота в файл...")
-                    val timestamp = System.currentTimeMillis()
-                    val filename = "screenshot_${timestamp}.jpg" // Используем JPEG с низким качеством для минимального размера
-                    val savedFile = saveImageToFile(fullPageScreenshot, filename)
-                    if (savedFile != null && savedFile.exists() && savedFile.length() > 0) {
-                        InAppLogger.success(Logger.Tags.SERVICE, "✅ Скриншот сохранен: ${savedFile.absolutePath}, размер: ${savedFile.length()} bytes")
-                    } else {
-                        InAppLogger.e(Logger.Tags.SERVICE, "❌ Не удалось сохранить скриншот в файл (файл не создан или пустой)")
-                    }
-                    // Освобождаем память после сохранения
-                    fullPageScreenshot.recycle()
-                    savedFile
-                } catch (e: Exception) {
-                    InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка сохранения скриншота: ${e.message}", e)
-                    // Освобождаем память даже при ошибке
-                    try {
-                        fullPageScreenshot.recycle()
-                    } catch (recycleException: Exception) {
-                        // Игнорируем ошибки при освобождении памяти
-                    }
-                    null
-                }
-            } else {
-                InAppLogger.w(Logger.Tags.SERVICE, "⚠️ Скриншот не создан, thumbnailFile будет null")
-                null
-            }
-            
-            // Создание архива страницы (MHTML - полный лендинг со всеми ресурсами)
-            // АРХИВ ОБЯЗАТЕЛЬНО ДОЛЖЕН СОЗДАВАТЬСЯ И ОТПРАВЛЯТЬСЯ
-            val pageArchive: File? = try {
-                if (finalUrl.contains("example.com") || finalUrl.contains("test-site")) {
-                    null
-                } else {
-                    val settingsRepository = SettingsRepository(context)
-                    val settings = settingsRepository.getSettings()
-                    val archiveMode = settings?.archiveMode ?: com.spyservice.mobile.ui.settings.ArchiveMode.MHTML
-                    val archiveService = PageArchiveService(context)
-                    val archive = archiveService.archivePage(finalUrl, archiveMode)
-                    archive
-                }
-            } catch (e: Exception) {
-                null
-            }
-            
-            // Используем превью изображение как основной файл для Media Image/Video (лендинг/тизер)
-            val landingFile = previewFile
-            
-            val timestamp = System.currentTimeMillis()
+            // Создаем минимальный объект CapturedCreative только с URL и архивом
             val capturedCreative = CapturedCreative(
-                landingUrl = finalUrl,
-                title = pageContent.title,
-                description = pageContent.description,
-                sourceLink = adLink,
-                landingImageFile = landingFile,  // Превью изображение для лендинга/тизера (media_file)
-                fullScreenshotFile = null,  // Не используется
-                thumbnailFile = thumbnailFile,  // Скриншот всей страницы для thumbnail_file
+                landingUrl = currentUrl,
+                title = null,
+                description = null,
+                sourceLink = null,
+                landingImageFile = null,
+                fullScreenshotFile = null,
+                thumbnailFile = null,
                 pageArchiveFile = pageArchive,
-                capturedAt = timestamp
+                capturedAt = System.currentTimeMillis()
             )
             
-            if (thumbnailFile != null) {
-                InAppLogger.d(Logger.Tags.SERVICE, "✅ Скриншот страницы создан: ${thumbnailFile.absolutePath}, размер: ${thumbnailFile.length()} bytes")
-            } else {
-                InAppLogger.w(Logger.Tags.SERVICE, "⚠️ Скриншот страницы не создан")
+            if (pageArchive == null) {
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Не удалось сохранить страницу через Chrome")
+                return@withContext CaptureResult.Error("Failed to save page archive through Chrome")
             }
+            
+            InAppLogger.success(Logger.Tags.SERVICE, "✅ Страница успешно сохранена: ${pageArchive.name} (${pageArchive.length()} bytes)")
+            InAppLogger.d(Logger.Tags.SERVICE, "📦 Создаем CapturedCreative с архивом: ${pageArchive.absolutePath}")
+            InAppLogger.d(Logger.Tags.SERVICE, "✅ CapturedCreative создан: landingUrl=${capturedCreative.landingUrl}, pageArchiveFile=${capturedCreative.pageArchiveFile?.name}")
             
             CaptureResult.Success(capturedCreative)
             
         } catch (e: Exception) {
+            InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка захвата креатива: ${e.message}", e)
             CaptureResult.Error("Capture failed: ${e.message}", e)
         }
     }
     
     /**
-     * Получить текущий URL из браузера
+     * Получить текущий URL из браузера с улучшенной обработкой ошибок
      */
     private suspend fun getCurrentUrl(): String? {
         try {
             if (accessibilityService == null) {
-                return createFallbackUrl()
+                return null
             }
             
+            delay(500)
             val rawUrl = accessibilityService?.getCurrentUrl()
+            
             if (rawUrl.isNullOrEmpty()) {
-                return createFallbackUrl()
+                delay(500)
+                val retryUrl = accessibilityService?.getCurrentUrl()
+                if (retryUrl.isNullOrEmpty()) {
+                    return null
+                }
+                return fixUrl(retryUrl)
             }
             
-            val correctedUrl = fixUrl(rawUrl)
-            return correctedUrl ?: createFallbackUrl()
+            return fixUrl(rawUrl)
         } catch (e: Exception) {
-            return createFallbackUrl()
+            InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка при извлечении URL: ${e.message}", e)
+            return null
         }
     }
     
@@ -232,442 +173,356 @@ class CreativeCaptureService(
         }
     }
     
-    private fun createFallbackUrl(): String {
-        // Создаем URL с текущим временем для тестирования
-        val timestamp = System.currentTimeMillis()
-        return "https://test-site-$timestamp.example.com"
-    }
-    
     /**
-     * Захватить лендинг страницу с повторными попытками
+     * Сохранить страницу используя встроенную функцию Chrome "Скачать страницу"
+     * Chrome уже видит правильную страницу через прокси, поэтому используем его функцию сохранения
+     * Ожидает завершения скачивания перед возвратом файла
      */
-    private suspend fun captureLandingPage(url: String): Bitmap? {
-        if (screenshotService == null) {
+    private suspend fun savePageUsingChrome(url: String): File? {
+        return try {
+            if (accessibilityService == null) {
             return null
         }
         
-        return captureWithRetries("landing page")
-    }
-    
-    /**
-     * Найти ссылку на объявление на странице
-     */
-    private suspend fun findAdLink(url: String): String? {
-        return accessibilityService?.findAdLinks()?.firstOrNull()
-    }
-    
-    /**
-     * Перейти по URL
-     */
-    private suspend fun navigateToUrl(url: String) {
-        accessibilityService?.navigateToUrl(url)
-    }
-    
-    /**
-     * Извлечь содержимое страницы
-     */
-    private suspend fun extractPageContent(url: String): PageContent {
-        try {
-            val accessibilityTitle = accessibilityService?.getPageTitle()
-            val accessibilityDescription = accessibilityService?.getPageDescription()
+            // Время перед началом сохранения (для фильтрации старых файлов)
+            val beforeSaveTime = System.currentTimeMillis()
             
-            val title = accessibilityTitle?.takeIf { it.isNotBlank() } ?: when {
-                url.contains("youtube.com") -> "YouTube Video"
-                url.contains("facebook.com") -> "Facebook Ad"
-                url.contains("instagram.com") -> "Instagram Story"
-                else -> "Landing Page"
+            // Запускаем детектор файлов ДО активации сохранения
+            val fileDetector = ChromePageFileDetector(context)
+            InAppLogger.d(Logger.Tags.SERVICE, "🔍 Запускаем детектор файлов Chrome...")
+            
+            // Запускаем поиск файла в фоне с использованием coroutineScope
+            var savedFile = coroutineScope {
+                val searchJob = async(Dispatchers.IO) {
+                    // Уменьшаем таймаут до 20 секунд (10 попыток × 2 секунды)
+                    fileDetector.findChromeSavedPageFile(beforeSaveTime, 20000)
+                }
+                
+                // Даем время на запуск детектора
+                delay(1000)
+                
+                // Активируем функцию "Скачать страницу" в Chrome
+                InAppLogger.d(Logger.Tags.SERVICE, "📥 Активируем функцию 'Скачать страницу' в Chrome...")
+                val success = accessibilityService.savePageInChrome()
+                if (!success) {
+                    InAppLogger.e(Logger.Tags.SERVICE, "❌ Не удалось активировать функцию 'Скачать страницу' в Chrome")
+                    return@coroutineScope null
+                }
+                
+                // Ждем начала сохранения страницы (Chrome сохраняет в папку Downloads)
+                delay(2000)
+                
+                // Ждем результат поиска файла
+                searchJob.await()
             }
             
-            val description = accessibilityDescription?.takeIf { it.isNotBlank() } ?: "Creative content"
-            
-            return PageContent(
-                url = url,
-                title = title,
-                description = description
-            )
-        } catch (e: Exception) {
-            return PageContent(
-                url = url,
-                title = "Error",
-                description = "Error: ${e.message}"
-            )
-        }
-    }
-    
-    /**
-     * Сделать скриншот всей страницы с повторными попытками
-     */
-    private suspend fun captureFullPage(url: String): Bitmap? {
-        return captureWithRetries("full page")
-    }
-    
-    /**
-     * Захватить скриншот с повторными попытками
-     */
-    private suspend fun captureWithRetries(type: String): Bitmap? {
-        repeat(MAX_RETRIES) { attempt ->
-            try {
-                val bitmap = screenshotService?.captureCurrentScreen()
-                if (bitmap != null) {
-                    return bitmap
+            // Если файл не найден автоматически, открываем файловый менеджер для ручного выбора
+            if (savedFile == null) {
+                InAppLogger.w(Logger.Tags.SERVICE, "⚠️ Файл не найден автоматически. Открываем файловый менеджер для ручного выбора...")
+                try {
+                    savedFile = openFilePickerForManualSelection()
+                    if (savedFile == null) {
+                        InAppLogger.e(Logger.Tags.SERVICE, "❌ Файл не выбран пользователем или корутина была отменена")
+                        return null
+                    }
+                    InAppLogger.success(Logger.Tags.SERVICE, "✅ Файл успешно выбран пользователем: ${savedFile.name}")
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    InAppLogger.e(Logger.Tags.SERVICE, "❌ Корутина отменена во время ожидания выбора файла: ${e.message}")
+                    return null
+                } catch (e: Exception) {
+                    InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка при выборе файла: ${e.message}", e)
+                    return null
                 }
+            }
+            
+            // Проверяем что файл действительно существует и не пустой
+            if (!savedFile.exists()) {
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Файл не существует: ${savedFile.absolutePath}")
+                return null
+            }
+            
+            val fileSize = savedFile.length()
+            if (fileSize == 0L) {
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Файл пустой: ${savedFile.absolutePath}")
+                return null
+            }
+            
+            InAppLogger.success(Logger.Tags.SERVICE, "✅ Файл найден: ${savedFile.name}, размер: $fileSize bytes, путь: ${savedFile.absolutePath}")
+            
+            // Обрабатываем и копируем файл в нашу папку для архива
+            val archiveDir = context.getExternalFilesDir("captures")
+            if (archiveDir == null) {
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Не удалось получить папку для архива")
+                return savedFile
+            }
+            
+            archiveDir.mkdirs()
+            if (!archiveDir.exists()) {
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Не удалось создать папку для архива: ${archiveDir.absolutePath}")
+                return savedFile
+            }
+            
+            // Генерируем имя файла на основе URL и времени
+            val timestamp = System.currentTimeMillis()
+            val domain = try {
+                val urlPart = url.substringAfter("://").substringBefore("/").substringBefore("?")
+                urlPart.replace(".", "_").replace("-", "_").take(50) // Ограничиваем длину
             } catch (e: Exception) {
-                // Игнорируем ошибки
+                "page"
             }
             
-            // Задержка перед следующей попыткой (кроме последней)
-            if (attempt < MAX_RETRIES - 1) {
-                delay(RETRY_DELAY_MS)
-            }
-        }
-        
-        return null
-    }
-    
-    /**
-     * Скачать архив страницы
-     */
-    private suspend fun downloadPageArchive(url: String): File? {
-        if (pageArchiver == null) {
-            return null
-        }
-        return try {
-            pageArchiver?.downloadPageAsZip(url)
-        } catch (e: Exception) {
-            null
-        }
-    }
-    
-    /**
-     * Создать миниатюру
-     */
-    private fun createThumbnail(bitmap: Bitmap?): Bitmap? {
-        if (bitmap == null) return null
-        
-        val thumbnailSize = 200
-        return Bitmap.createScaledBitmap(
-            bitmap,
-            thumbnailSize,
-            (bitmap.height * thumbnailSize) / bitmap.width,
-            true
-        )
-    }
-    
-    /**
-     * Сохранить изображение в файл
-     */
-    private fun saveImageToFile(bitmap: Bitmap?, filename: String): File? {
-        if (bitmap == null) {
-            InAppLogger.w(Logger.Tags.SERVICE, "⚠️ Bitmap равен null, невозможно сохранить файл: $filename")
-            return null
-        }
-        
-        return try {
-            val capturesDir = context.getExternalFilesDir("captures")
-            if (capturesDir == null) {
-                InAppLogger.e(Logger.Tags.SERVICE, "❌ Не удалось получить директорию captures")
-                return null
-            }
+            // Определяем расширение файла на основе исходного файла
+            val originalExtension = savedFile.extension.ifEmpty { "mhtml" }
+            val archiveFileName = "${domain}_${timestamp}.${originalExtension}"
+            val archiveFile = File(archiveDir, archiveFileName)
             
-            capturesDir.mkdirs()
-            val file = File(capturesDir, filename)
-            
-            InAppLogger.d(Logger.Tags.SERVICE, "💾 Сохранение скриншота: ${file.absolutePath}, размер bitmap: ${bitmap.width}x${bitmap.height}")
-            
-            // Проверяем, что bitmap не пустой
-            if (bitmap.isRecycled) {
-                InAppLogger.e(Logger.Tags.SERVICE, "❌ Bitmap уже переработан, невозможно сохранить")
-                return null
-            }
-            
-            // Проверяем, что bitmap содержит данные (не полностью белый)
-            val samplePixel = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)
-            val isWhite = android.graphics.Color.red(samplePixel) == 255 && 
-                         android.graphics.Color.green(samplePixel) == 255 && 
-                         android.graphics.Color.blue(samplePixel) == 255
-            if (isWhite && bitmap.width > 100 && bitmap.height > 100) {
-                InAppLogger.w(Logger.Tags.SERVICE, "⚠️ Предупреждение: скриншот может быть пустым (белый цвет в центре)")
-            }
-            
-            // Оптимизируем bitmap перед сохранением (только если нужно)
-            val optimizedBitmap = optimizeBitmapForSize(bitmap)
-            
-            var compressed = false
-            // Сохраняем скриншот с хорошим качеством - Supabase поддерживает большие файлы
-            // Убираем все ограничения по размеру, оставляем только оптимизацию качества
-            var quality = 85 // Используем качество 85% для хорошего баланса
-            var currentBitmap = optimizedBitmap
-            
-            // Сохраняем файл с выбранным качеством
-            FileOutputStream(file).use { out ->
-                compressed = currentBitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
-            }
-            
-            if (!compressed) {
-                InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка сжатия bitmap в JPEG")
-            }
-            
-            // Освобождаем память
-            if (currentBitmap != bitmap && currentBitmap != optimizedBitmap && !currentBitmap.isRecycled) {
-                currentBitmap.recycle()
-            }
-            
-            // Если сжатие не удалось, удаляем пустой файл
-            if (!compressed && file.exists() && file.length() == 0L) {
-                file.delete()
-                InAppLogger.e(Logger.Tags.SERVICE, "❌ Удален пустой файл после неудачного сжатия")
-                return null
-            }
-            
-            // Освобождаем память, если создали оптимизированную версию
-            if (optimizedBitmap != bitmap && !optimizedBitmap.isRecycled) {
-                optimizedBitmap.recycle()
-            }
-            
-            val finalFileSize = file.length()
-            val exists = file.exists()
-            InAppLogger.d(Logger.Tags.SERVICE, "📁 Файл скриншота: exists=$exists, size=$finalFileSize bytes (${finalFileSize / 1024 / 1024} MB)")
-            
-            if (!exists || finalFileSize == 0L) {
-                InAppLogger.e(Logger.Tags.SERVICE, "❌ Файл скриншота не создан или пустой: exists=$exists, size=$finalFileSize")
-                return null
-            }
-            
-            file
-        } catch (e: IOException) {
-            InAppLogger.e(Logger.Tags.SERVICE, "❌ IOException при сохранении скриншота: ${e.message}", e)
-            null
-        } catch (e: Exception) {
-            InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка при сохранении скриншота: ${e.message}", e)
-            null
-        }
-    }
-    
-    /**
-     * Оптимизировать bitmap для уменьшения размера файла
-     * Уменьшаем только если действительно необходимо, сохраняя качество
-     */
-    private fun optimizeBitmapForSize(bitmap: Bitmap): Bitmap {
-        // Проверяем, что bitmap не пустой
-        if (bitmap.isRecycled || bitmap.width == 0 || bitmap.height == 0) {
-            InAppLogger.e(Logger.Tags.SERVICE, "❌ Bitmap пустой или переработанный")
-            return bitmap
-        }
-        
-        val maxWidth = 1920 // Максимальная ширина (не уменьшаем, если меньше)
-        val maxHeight = 50000 // Максимальная высота (увеличено для очень длинных страниц)
-        
-        // Если изображение не слишком большое, возвращаем как есть
-        if (bitmap.width <= maxWidth && bitmap.height <= maxHeight) {
-            return bitmap
-        }
-        
-        // Уменьшаем только если высота превышает максимум, но сохраняем ширину
-        var newWidth = bitmap.width
-        var newHeight = bitmap.height
-        
-        if (bitmap.height > maxHeight) {
-            // Уменьшаем только высоту пропорционально
-            val scale = maxHeight.toFloat() / bitmap.height
-            newHeight = maxHeight
-            newWidth = (bitmap.width * scale).toInt()
-            InAppLogger.d(Logger.Tags.SERVICE, "🔄 Уменьшение высоты скриншота: ${bitmap.width}x${bitmap.height} -> ${newWidth}x${newHeight}")
-        } else if (bitmap.width > maxWidth) {
-            // Уменьшаем только ширину пропорционально
-            val scale = maxWidth.toFloat() / bitmap.width
-            newWidth = maxWidth
-            newHeight = (bitmap.height * scale).toInt()
-            InAppLogger.d(Logger.Tags.SERVICE, "🔄 Уменьшение ширины скриншота: ${bitmap.width}x${bitmap.height} -> ${newWidth}x${newHeight}")
-        } else {
-            return bitmap // Не нужно уменьшать
-        }
-        
-        // Проверяем, что новые размеры валидны
-        if (newWidth <= 0 || newHeight <= 0) {
-            InAppLogger.e(Logger.Tags.SERVICE, "❌ Невалидные размеры после уменьшения: ${newWidth}x${newHeight}")
-            return bitmap
-        }
-        
-        // Создаем уменьшенную версию
-        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-    }
-
-    /**
-     * Универсальный захват скриншота через простой WebView
-     */
-    private suspend fun captureUniversalScreenshot(url: String): Bitmap? = withContext(Dispatchers.Main) {
-        return@withContext try {
-            InAppLogger.d(Logger.Tags.SERVICE, "🌐 Создание простого скриншота для: $url")
-            
-            // Создаем простой WebView для рендеринга
-            val webView = android.webkit.WebView(context)
-            
-            // Настройки WebView
-            webView.settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                loadsImagesAutomatically = true
-                useWideViewPort = true
-                loadWithOverviewMode = true
-                userAgentString = "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-            }
-            
-            // Размеры для скриншота
-            val displayMetrics = context.resources.displayMetrics
-            val width = displayMetrics.widthPixels
-            val height = displayMetrics.heightPixels * 10 // ЗНАЧИТЕЛЬНО увеличиваем для очень длинных страниц
-            
-            // Устанавливаем размеры
-            val widthSpec = android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY)
-            val heightSpec = android.view.View.MeasureSpec.makeMeasureSpec(height, android.view.View.MeasureSpec.EXACTLY)
-            
-            webView.measure(widthSpec, heightSpec)
-            webView.layout(0, 0, width, height)
-            
-            // Ждем загрузки страницы
-            var pageLoaded = false
-            webView.webViewClient = object : android.webkit.WebViewClient() {
-                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
-                    pageLoaded = true
-                    InAppLogger.d(Logger.Tags.SERVICE, "✅ Страница загружена: $url")
+            try {
+                // Копируем файл
+                savedFile.copyTo(archiveFile, overwrite = true)
+                
+                // Проверяем что файл скопирован успешно
+                if (!archiveFile.exists() || archiveFile.length() != fileSize) {
+                    InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка копирования: файл не скопирован корректно")
+                    return savedFile
                 }
+                
+                InAppLogger.success(Logger.Tags.SERVICE, "✅ Архив создан: ${archiveFile.name}, размер: ${archiveFile.length()} bytes, путь: ${archiveFile.absolutePath}")
+                return archiveFile
+            } catch (e: Exception) {
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка копирования файла: ${e.message}", e)
+                // Возвращаем оригинальный файл если копирование не удалось
+                return savedFile
             }
+        } catch (e: Exception) {
+            InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка сохранения страницы через Chrome: ${e.message}", e)
+            null
+        }
+    }
+    
+    /**
+     * Получить список скачанных файлов через MediaStore и прямой доступ к папке
+     * Работает на всех версиях Android, включая Android 10+
+     */
+    private fun getDownloadedFiles(minTime: Long): List<File> {
+        val files = mutableSetOf<File>()
+        
+        // Метод 1: Поиск через MediaStore
+        try {
+            val contentResolver = context.contentResolver
             
-            InAppLogger.d(Logger.Tags.SERVICE, "🔄 Загрузка страницы...")
-            webView.loadUrl(url)
-            
-            // Ждем загрузки (максимум 10 секунд)
-            var waitTime = 0
-            while (!pageLoaded && waitTime < 10000) {
-                delay(500)
-                waitTime += 500
+            // Пробуем разные URI для разных версий Android
+            val uris = mutableListOf<Uri>()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                uris.add(MediaStore.Downloads.EXTERNAL_CONTENT_URI)
             }
+            uris.add(MediaStore.Files.getContentUri("external"))
             
-            if (!pageLoaded) {
-                InAppLogger.w(Logger.Tags.SERVICE, "⚠️ Страница не загрузилась за 10 секунд")
-            }
-            
-            // Дополнительная задержка для загрузки ресурсов
-            delay(2000)
-            
-            // Принудительно прокручиваем страницу для загрузки всего контента
-            InAppLogger.d(Logger.Tags.SERVICE, "📜 Прокрутка страницы для загрузки всего контента...")
-            webView.evaluateJavascript("""
-                (function() {
-                    // Прокручиваем до конца страницы несколько раз
-                    for(let i = 0; i < 5; i++) {
-                        window.scrollTo(0, document.body.scrollHeight);
-                        // Небольшая пауза между прокрутками
-                        setTimeout(() => {}, 200);
+            for (uri in uris) {
+                try {
+                    val projection = arrayOf(
+                        MediaStore.Downloads._ID,
+                        MediaStore.Downloads.DISPLAY_NAME,
+                        MediaStore.Downloads.DATE_MODIFIED,
+                        MediaStore.Downloads.SIZE,
+                        MediaStore.Downloads.DATA,
+                        MediaStore.Downloads.RELATIVE_PATH
+                    )
+                    
+                    val selection = "${MediaStore.Downloads.DATE_MODIFIED} >= ?"
+                    val selectionArgs = arrayOf((minTime / 1000).toString()) // MediaStore использует секунды
+                    val sortOrder = "${MediaStore.Downloads.DATE_MODIFIED} DESC"
+                    
+                    val cursor: Cursor? = contentResolver.query(
+                        uri,
+                        projection,
+                        selection,
+                        selectionArgs,
+                        sortOrder
+                    )
+                    
+                    cursor?.use {
+                        val idColumn = it.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                        val nameColumn = it.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+                        val dataColumn = it.getColumnIndexOrThrow(MediaStore.Downloads.DATA)
+                        val relativePathColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            it.getColumnIndex(MediaStore.Downloads.RELATIVE_PATH)
+                        } else {
+                            -1
+                        }
+                        
+                        while (it.moveToNext()) {
+                            try {
+                                val id = it.getLong(idColumn)
+                                val name = it.getString(nameColumn)
+                                var data = if (dataColumn >= 0) it.getString(dataColumn) else null
+                                
+                                // Для Android 10+ может не быть DATA, используем RELATIVE_PATH
+                                if (data == null && relativePathColumn >= 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    val relativePath = it.getString(relativePathColumn)
+                                    if (relativePath != null) {
+                                        val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                                        data = File(downloadsDir, relativePath).absolutePath
+                                    }
+                                }
+                                
+                                if (data != null) {
+                                    val file = File(data)
+                                    if (file.exists() && file.isFile) {
+                                        files.add(file)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // Пропускаем проблемные записи
+                                continue
+                            }
+                        }
                     }
-                    
-                    // Загружаем все ленивые изображения
-                    const lazyImages = document.querySelectorAll('img[data-src], img[data-lazy-src], img[loading="lazy"], img[data-srcset]');
-                    lazyImages.forEach(img => {
-                        if (img.dataset.src) img.src = img.dataset.src;
-                        if (img.dataset.lazySrc) img.src = img.dataset.lazySrc;
-                        if (img.dataset.srcset) img.srcset = img.dataset.srcset;
-                    });
-                    
-                    return document.body.scrollHeight;
-                })();
-            """.trimIndent()) { result ->
-                InAppLogger.d(Logger.Tags.SERVICE, "📏 JavaScript: высота документа = $result")
-            }
-            
-            // Ждем загрузки после прокрутки
-            delay(3000)
-            
-            // Получаем реальную высоту контента
-            val contentHeight = webView.contentHeight
-            val scale = webView.scale
-            val realContentHeight = (contentHeight * scale).toInt()
-            
-            InAppLogger.d(Logger.Tags.SERVICE, "📏 Финальные размеры: contentHeight=$contentHeight, scale=$scale, realHeight=$realContentHeight")
-            
-            // Используем максимальную высоту для захвата всей страницы
-            val finalHeight = maxOf(realContentHeight, height, displayMetrics.heightPixels * 5)
-            
-            InAppLogger.d(Logger.Tags.SERVICE, "📐 Итоговая высота скриншота: $finalHeight")
-            
-            // Перемеряем WebView с увеличенной высотой
-            val finalHeightSpec = android.view.View.MeasureSpec.makeMeasureSpec(finalHeight, android.view.View.MeasureSpec.EXACTLY)
-            webView.measure(widthSpec, finalHeightSpec)
-            webView.layout(0, 0, width, finalHeight)
-            
-            InAppLogger.d(Logger.Tags.SERVICE, "📸 Создание полного скриншота: ${width}x${finalHeight}")
-            
-            // Дополнительная задержка для завершения рендеринга
-            delay(3000)
-            
-            // Принудительно обновляем отрисовку несколько раз
-            webView.invalidate()
-            webView.post {
-                webView.invalidate()
-                webView.post {
-                    webView.invalidate()
+                } catch (e: Exception) {
+                    InAppLogger.d(Logger.Tags.SERVICE, "⚠️ Ошибка при запросе MediaStore URI $uri: ${e.message}")
                 }
             }
+        } catch (e: Exception) {
+            InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка при получении списка скачанных файлов через MediaStore: ${e.message}", e)
+        }
+        
+        // Метод 2: Прямой доступ к папке Downloads (для старых версий Android или как резерв)
+        try {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            if (downloadsDir.exists() && downloadsDir.canRead()) {
+                val dirFiles = downloadsDir.listFiles()?.filter { 
+                    it.isFile && it.lastModified() >= minTime 
+                } ?: emptyList()
+                
+                files.addAll(dirFiles)
+                InAppLogger.d(Logger.Tags.SERVICE, "📁 Найдено файлов через прямой доступ: ${dirFiles.size}")
+            }
+        } catch (e: Exception) {
+            InAppLogger.d(Logger.Tags.SERVICE, "⚠️ Ошибка при прямом доступе к папке Downloads: ${e.message}")
+        }
+        
+        // Метод 3: Проверка внутренней папки Downloads приложения (если Chrome сохраняет туда)
+        try {
+            val appDownloadsDir = File(context.getExternalFilesDir(null), "Downloads")
+            if (appDownloadsDir.exists()) {
+                val appFiles = appDownloadsDir.listFiles()?.filter { 
+                    it.isFile && it.lastModified() >= minTime 
+                } ?: emptyList()
+                files.addAll(appFiles)
+                InAppLogger.d(Logger.Tags.SERVICE, "📁 Найдено файлов в папке приложения: ${appFiles.size}")
+            }
+        } catch (e: Exception) {
+            // Игнорируем ошибки
+        }
+        
+        InAppLogger.d(Logger.Tags.SERVICE, "📋 Всего найдено файлов: ${files.size}")
+        return files.toList()
+    }
+    
+    /**
+     * Открыть файловый менеджер для ручного выбора файла страницы
+     * Используется если автоматический поиск не нашел файл
+     * Открывает файловый менеджер Samsung с папкой Downloads и ЖДЕТ выбора файла
+     */
+    private suspend fun openFilePickerForManualSelection(): File? {
+        return try {
+            if (activity == null) {
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Activity не доступна для открытия файлового менеджера")
+                return null
+            }
             
-            // Еще одна задержка для завершения отрисовки
-            delay(2000)
+            InAppLogger.d(Logger.Tags.SERVICE, "📁 Открываем файловый менеджер Samsung для выбора файла...")
             
-            // Создаем bitmap напрямую (более надежно чем Picture API)
-            val bitmap = Bitmap.createBitmap(width, finalHeight, Bitmap.Config.ARGB_8888)
-            val canvas = android.graphics.Canvas(bitmap)
+            // Используем suspendCancellableCoroutine для ожидания результата выбора файла
+            kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                // Сохраняем continuation для использования в Activity
+                filePickerContinuation = continuation
+                
+                // Обработчик отмены корутины
+                continuation.invokeOnCancellation {
+                    InAppLogger.w(Logger.Tags.SERVICE, "⚠️ Корутина отменена до выбора файла")
+                    filePickerContinuation = null
+                }
+                
+                // Создаем Intent для открытия файлового менеджера Samsung
+                val intent = FilePickerHelper.createSamsungDownloadsIntent(context)
+                
+                try {
+                    // Используем startActivityForResult для получения результата
+                    // ВАЖНО: continuation будет вызван в handleFilePickerResult когда пользователь выберет файл
+                    activity.startActivityForResult(intent, REQUEST_CODE_FILE_PICKER)
+                    InAppLogger.d(Logger.Tags.SERVICE, "📁 Файловый менеджер открыт. Ожидаем выбор файла...")
+                    InAppLogger.d(Logger.Tags.SERVICE, "⏳ Программа ждет выбора файла пользователем...")
+                    InAppLogger.d(Logger.Tags.SERVICE, "⏳ Continuation сохранен, корутина приостановлена до выбора файла")
+                    
+                    // Continuation будет вызван в handleFilePickerResult() когда пользователь выберет файл
+                    // НЕ вызываем continuation здесь - ждем результата из Activity
+                } catch (e: Exception) {
+                    InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка открытия файлового менеджера: ${e.message}", e)
+                    filePickerContinuation = null
+                    continuation.resume(null)
+                }
+            }
+        } catch (e: Exception) {
+            InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка при открытии файлового менеджера: ${e.message}", e)
+            null
+        }
+    }
+    
+    // Continuation для ожидания результата выбора файла
+    private var filePickerContinuation: kotlin.coroutines.Continuation<File?>? = null
+    
+    /**
+     * Обработать результат выбора файла из файлового менеджера
+     * Должен вызываться из Activity в onActivityResult
+     */
+    fun handleFilePickerResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        if (requestCode == REQUEST_CODE_FILE_PICKER) {
+            val continuation = filePickerContinuation
+            filePickerContinuation = null
             
-            // Белый фон
-            canvas.drawColor(android.graphics.Color.WHITE)
+            if (continuation == null) {
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Continuation не найден - корутина уже завершена или отменена")
+                return
+            }
             
-            // Сохраняем текущее состояние canvas
-            canvas.save()
-            
-            // Рисуем WebView напрямую на canvas
-            webView.draw(canvas)
-            
-            // Восстанавливаем состояние canvas
-            canvas.restore()
-            
-            // Проверяем, что bitmap не пустой (проверяем несколько пикселей в разных местах)
-            var hasContent = false
-            var nonWhitePixels = 0
-            val checkPoints = listOf(
-                Pair(bitmap.width / 4, bitmap.height / 4),
-                Pair(bitmap.width / 2, bitmap.height / 2),
-                Pair(bitmap.width * 3 / 4, bitmap.height * 3 / 4),
-                Pair(bitmap.width / 4, bitmap.height * 3 / 4),
-                Pair(bitmap.width * 3 / 4, bitmap.height / 4)
-            )
-            
-            for ((x, y) in checkPoints) {
-                if (x < bitmap.width && y < bitmap.height) {
-                    val pixel = bitmap.getPixel(x, y)
-                    val r = android.graphics.Color.red(pixel)
-                    val g = android.graphics.Color.green(pixel)
-                    val b = android.graphics.Color.blue(pixel)
-                    // Если пиксель не белый, значит есть контент
-                    if (!(r == 255 && g == 255 && b == 255)) {
-                        nonWhitePixels++
-                        hasContent = true
+            if (resultCode == android.app.Activity.RESULT_OK && data != null) {
+                val uri = data.data
+                if (uri != null) {
+                    InAppLogger.d(Logger.Tags.SERVICE, "📁 Получен URI выбранного файла: $uri")
+                    val file = FilePickerHelper.getFileFromUri(context, uri)
+                    if (file != null && file.exists() && file.length() > 0) {
+                        InAppLogger.success(Logger.Tags.SERVICE, "✅ Файл выбран пользователем: ${file.name} (${file.length()} bytes)")
+                        InAppLogger.d(Logger.Tags.SERVICE, "📤 Возобновляем корутину с выбранным файлом...")
+                        try {
+                            continuation.resume(file)
+                        } catch (e: Exception) {
+                            InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка возобновления корутины: ${e.message}", e)
+                        }
+                    } else {
+                        InAppLogger.e(Logger.Tags.SERVICE, "❌ Выбранный файл недоступен или пустой")
+                        try {
+                            continuation.resume(null)
+                        } catch (e: Exception) {
+                            InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка возобновления корутины: ${e.message}", e)
+                        }
+                    }
+                } else {
+                    InAppLogger.e(Logger.Tags.SERVICE, "❌ Файл не выбран (URI null)")
+                    try {
+                        continuation.resume(null)
+                    } catch (e: Exception) {
+                        InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка возобновления корутины: ${e.message}", e)
                     }
                 }
-            }
-            
-            if (!hasContent || nonWhitePixels < 2) {
-                InAppLogger.w(Logger.Tags.SERVICE, "⚠️ Предупреждение: скриншот может быть пустым (найдено только $nonWhitePixels небелых пикселей)")
             } else {
-                InAppLogger.d(Logger.Tags.SERVICE, "✅ Обнаружен контент в скриншоте ($nonWhitePixels небелых пикселей)")
+                InAppLogger.e(Logger.Tags.SERVICE, "❌ Пользователь отменил выбор файла (resultCode: $resultCode)")
+                try {
+                    continuation.resume(null)
+                } catch (e: Exception) {
+                    InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка возобновления корутины: ${e.message}", e)
+                }
             }
-            
-            // Очищаем WebView
-            webView.destroy()
-            
-            InAppLogger.success(Logger.Tags.SERVICE, "✅ Полный скриншот страницы создан: ${bitmap.width}x${bitmap.height}")
-            bitmap
-            
-        } catch (e: Exception) {
-            InAppLogger.e(Logger.Tags.SERVICE, "❌ Ошибка универсального скриншота: ${e.message}", e)
-            null
         }
     }
+    
 }

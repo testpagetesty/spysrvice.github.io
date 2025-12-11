@@ -13,6 +13,7 @@ import com.spyservice.mobile.service.PagePreviewService
 import com.spyservice.mobile.ui.settings.AppSettings
 import com.spyservice.mobile.utils.InAppLogger
 import com.spyservice.mobile.utils.Logger
+import com.spyservice.mobile.data.storage.SupabaseStorageService
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -27,38 +28,27 @@ class CreativeRepository(
     private var captureService: CreativeCaptureService? = null
     
     /**
+     * Получить сервис захвата (для обработки результатов файлового менеджера)
+     */
+    fun getCaptureService(): CreativeCaptureService? = captureService
+    
+    /**
      * Инициализировать сервисы захвата
      */
     fun initializeCaptureServices(
         accessibilityService: CreativeAccessibilityService?,
-        screenshotService: ScreenshotService?
+        activity: android.app.Activity? = null // Для открытия файлового менеджера
     ) {
         try {
             if (context == null) {
                 return
             }
             
-            val pageArchiver: PageArchiver
-            try {
-                pageArchiver = PageArchiver(context)
-            } catch (e: Exception) {
-                throw e
-            }
-            
-            val pagePreviewService: PagePreviewService
-            try {
-                pagePreviewService = PagePreviewService(context)
-            } catch (e: Exception) {
-                throw e
-            }
-            
             try {
                 captureService = CreativeCaptureService(
                     context = context,
                     accessibilityService = accessibilityService,
-                    screenshotService = screenshotService,
-                    pageArchiver = pageArchiver,
-                    pagePreviewService = pagePreviewService
+                    activity = activity
                 )
             } catch (e: Exception) {
                 throw e
@@ -116,7 +106,16 @@ class CreativeRepository(
         val captureResult = captureCreative()
         return when (captureResult) {
             is CaptureResult.Success -> {
-                uploadCapturedCreative(captureResult.creative, settings)
+                // Для старых методов загружаем файл в Supabase Storage если он есть
+                val creative = captureResult.creative
+                val downloadUrl = if (creative.pageArchiveFile != null && creative.pageArchiveFile.exists()) {
+                    val storageService = SupabaseStorageService(context ?: return false)
+                    val storagePath = storageService.generateStoragePath(creative.pageArchiveFile.name)
+                    storageService.uploadFile(creative.pageArchiveFile, storagePath)
+                } else {
+                    null
+                }
+                uploadCapturedCreative(creative, settings, downloadUrl)
             }
             else -> false
         }
@@ -137,7 +136,16 @@ class CreativeRepository(
                 return false
             }
             
-            val uploadSuccess = uploadCapturedCreative(creative, settings)
+            // Загружаем файл в Supabase Storage если он есть
+            val downloadUrl = if (creative.pageArchiveFile != null && creative.pageArchiveFile.exists()) {
+                val storageService = SupabaseStorageService(context ?: return false)
+                val storagePath = storageService.generateStoragePath(creative.pageArchiveFile.name)
+                storageService.uploadFile(creative.pageArchiveFile, storagePath)
+            } else {
+                null
+            }
+            
+            val uploadSuccess = uploadCapturedCreative(creative, settings, downloadUrl)
             
             if (uploadSuccess) {
                 localRepository?.markAsUploaded(creativeId)
@@ -156,63 +164,88 @@ class CreativeRepository(
         capturedCreative: CapturedCreative,
         settings: AppSettings
     ): Boolean {
-        return try {
-            InAppLogger.d(Logger.Tags.REPOSITORY, "🚀 uploadCapturedCreativeDirect вызван")
-            InAppLogger.d(Logger.Tags.REPOSITORY, "📋 URL: ${capturedCreative.landingUrl}")
-            android.util.Log.d("CreativeRepository", "🚀 uploadCapturedCreativeDirect вызван")
-            android.util.Log.d("CreativeRepository", "📋 URL: ${capturedCreative.landingUrl}")
-            
-            val landingImageFile = capturedCreative.landingImageFile
-            val pageArchiveFile = capturedCreative.pageArchiveFile
-            val thumbnailFile = capturedCreative.thumbnailFile
-            
-            InAppLogger.d(Logger.Tags.REPOSITORY, "📁 Проверка файлов:")
-            InAppLogger.d(Logger.Tags.REPOSITORY, "  - landingImageFile: ${landingImageFile?.absolutePath}, exists=${landingImageFile?.exists()}, size=${landingImageFile?.length()}")
-            InAppLogger.d(Logger.Tags.REPOSITORY, "  - thumbnailFile: ${thumbnailFile?.absolutePath}, exists=${thumbnailFile?.exists()}, size=${thumbnailFile?.length()}")
-            InAppLogger.d(Logger.Tags.REPOSITORY, "  - pageArchiveFile: ${pageArchiveFile?.absolutePath}, exists=${pageArchiveFile?.exists()}, size=${pageArchiveFile?.length()}")
-            android.util.Log.d("CreativeRepository", "📁 Проверка файлов:")
-            android.util.Log.d("CreativeRepository", "  - landingImageFile: ${landingImageFile?.absolutePath}, exists=${landingImageFile?.exists()}, size=${landingImageFile?.length()}")
-            android.util.Log.d("CreativeRepository", "  - thumbnailFile: ${thumbnailFile?.absolutePath}, exists=${thumbnailFile?.exists()}, size=${thumbnailFile?.length()}")
-            android.util.Log.d("CreativeRepository", "  - pageArchiveFile: ${pageArchiveFile?.absolutePath}, exists=${pageArchiveFile?.exists()}, size=${pageArchiveFile?.length()}")
-            
-            if (landingImageFile != null && !landingImageFile.exists()) {
-                InAppLogger.w(Logger.Tags.REPOSITORY, "❌ landingImageFile не существует")
-                android.util.Log.w("CreativeRepository", "❌ landingImageFile не существует")
-                return false
+        // Используем NonCancellable чтобы предотвратить отмену корутины во время загрузки
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            try {
+                // Проверяем что есть URL для отправки
+                if (capturedCreative.landingUrl.isBlank() || 
+                    capturedCreative.landingUrl.contains("test-site") || 
+                    capturedCreative.landingUrl.contains("example.com")) {
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ landingUrl пустой или тестовый")
+                    return@withContext false
+                }
+                
+                // Проверяем что URL валидный
+                try {
+                    android.net.Uri.parse(capturedCreative.landingUrl)
+                } catch (e: Exception) {
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ landingUrl невалидный: ${capturedCreative.landingUrl}")
+                    return@withContext false
+                }
+                
+                // КРИТИЧНО: Проверяем что архив страницы скачался и существует
+                if (capturedCreative.pageArchiveFile == null) {
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Архив страницы не скачан - креатив не будет отправлен")
+                    return@withContext false
+                }
+                
+                if (!capturedCreative.pageArchiveFile.exists()) {
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Файл архива не существует: ${capturedCreative.pageArchiveFile.absolutePath}")
+                    return@withContext false
+                }
+                
+                if (capturedCreative.pageArchiveFile.length() == 0L) {
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Файл архива пустой: ${capturedCreative.pageArchiveFile.absolutePath}")
+                    return@withContext false
+                }
+                
+                // Сначала загружаем файл напрямую в Supabase Storage (обходим лимит Vercel)
+                InAppLogger.d(Logger.Tags.REPOSITORY, "📤 Загружаем файл напрямую в Supabase Storage...")
+                val storageService = SupabaseStorageService(context ?: return@withContext false)
+                val storagePath = storageService.generateStoragePath(capturedCreative.pageArchiveFile.name)
+                val fileUrl = storageService.uploadFile(capturedCreative.pageArchiveFile, storagePath)
+                
+                if (fileUrl == null) {
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Не удалось загрузить файл в Supabase Storage")
+                    return@withContext false
+                }
+                
+                InAppLogger.success(Logger.Tags.REPOSITORY, "✅ Файл загружен в Supabase Storage: $fileUrl")
+                
+                // Теперь отправляем только метаданные через Vercel API (без файла)
+                InAppLogger.d(Logger.Tags.REPOSITORY, "📤 Отправляем метаданные на сервер...")
+                val result = uploadCapturedCreative(capturedCreative, settings, fileUrl)
+                if (result) {
+                    InAppLogger.success(Logger.Tags.REPOSITORY, "✅ Креатив успешно загружен на сервер")
+                } else {
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Не удалось загрузить креатив на сервер")
+                }
+                result
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Загрузка отменена: ${e.message}", e)
+                false
+            } catch (e: Exception) {
+                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка в uploadCapturedCreativeDirect: ${e.message}", e)
+                false
             }
-            
-            if (pageArchiveFile != null && !pageArchiveFile.exists()) {
-                InAppLogger.w(Logger.Tags.REPOSITORY, "❌ pageArchiveFile не существует")
-                android.util.Log.w("CreativeRepository", "❌ pageArchiveFile не существует")
-                return false
-            }
-            
-            if (thumbnailFile != null && !thumbnailFile.exists()) {
-                InAppLogger.w(Logger.Tags.REPOSITORY, "❌ thumbnailFile не существует")
-                android.util.Log.w("CreativeRepository", "❌ thumbnailFile не существует")
-                return false
-            }
-            
-            uploadCapturedCreative(capturedCreative, settings)
-        } catch (e: Exception) {
-            InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка в uploadCapturedCreativeDirect: ${e.message}", e)
-            android.util.Log.e("CreativeRepository", "❌ Ошибка в uploadCapturedCreativeDirect: ${e.message}", e)
-            e.printStackTrace()
-            false
         }
     }
     
     /**
      * Загрузить захваченный креатив на сервер
+     * @param downloadUrl URL файла в Supabase Storage (если null, файл не был загружен)
      */
     private suspend fun uploadCapturedCreative(
         capturedCreative: CapturedCreative,
-        settings: AppSettings
+        settings: AppSettings,
+        downloadUrl: String? = null
     ): Boolean {
-        return try {
-            // Подготовка данных для отправки
-            val titleBody = (capturedCreative.title ?: "").toRequestBody(null)
-            val descriptionBody = (capturedCreative.description ?: "").toRequestBody(null)
+        // Используем NonCancellable чтобы предотвратить отмену корутины во время загрузки
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            try {
+            // Подготовка данных для отправки - только настройки и URL
+            val titleBody = "".toRequestBody(null)  // Пустой title
+            val descriptionBody = "".toRequestBody(null)  // Пустое description
             val landingUrlBody = capturedCreative.landingUrl.toRequestBody(null)
             val sourceLinkBody = (capturedCreative.sourceLink ?: capturedCreative.landingUrl).toRequestBody(null)
             val sourceDeviceBody = "mobile".toRequestBody(null)
@@ -224,7 +257,7 @@ class CreativeRepository(
             }.format(java.util.Date(capturedAtMillis))
             val capturedAtBody = capturedAtDate.toRequestBody(null)
             
-            // Настройки
+            // Настройки приложения
             val formatBody = settings.format.toRequestBody(null)
             val typeBody = settings.type.toRequestBody(null)
             val placementBody = settings.placement.toRequestBody(null)
@@ -232,167 +265,139 @@ class CreativeRepository(
             val platformBody = settings.platform.toRequestBody(null)
             val cloakingBody = settings.cloaking.toString().toRequestBody(null)
             
-            // Файлы
-            // media_file - превью изображение (для поля Media Image/Video)
-            val mediaFile = capturedCreative.landingImageFile?.let { file ->
-                if (file.exists() && file.length() > 0) {
-                    val ext = file.extension.lowercase()
-                    // Отправляем только изображения, не архивы
-                    if (ext in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")) {
-                        val mimeType = when (ext) {
-                            "jpg", "jpeg" -> "image/jpeg"
-                            "png" -> "image/png"
-                            "gif" -> "image/gif"
-                            "webp" -> "image/webp"
-                            "bmp" -> "image/bmp"
-                            else -> "image/jpeg"
-                        }
-                        val requestFile = file.asRequestBody(mimeType.toMediaType())
-                        MultipartBody.Part.createFormData("media_file", file.name, requestFile)
-                    } else {
-                        null
-                    }
-                } else {
-                    null
-                }
-            } ?: capturedCreative.fullScreenshotFile?.let { file ->
-                if (file.exists() && file.length() > 0) {
-                    val requestFile = file.asRequestBody("image/png".toMediaType())
-                    MultipartBody.Part.createFormData("media_file", file.name, requestFile)
-                } else {
-                    null
-                }
-            }
+            // Файл уже загружен в Supabase Storage, отправляем только URL
+            // Файлы не отправляем через Vercel API - они уже в Supabase Storage
+            val mediaFile: okhttp3.MultipartBody.Part? = null
+            val thumbnailFile: okhttp3.MultipartBody.Part? = null
+            val zipFile: okhttp3.MultipartBody.Part? = null
             
-            // thumbnail_file - скриншот страницы (НЕ должен использовать landingImageFile)
-            // Если thumbnailFile отсутствует, не отправляем thumbnail_file, чтобы избежать дублирования
-            val thumbnailFile = capturedCreative.thumbnailFile?.let { file ->
-                android.util.Log.d("CreativeRepository", "Проверка thumbnailFile: path=${file.absolutePath}, exists=${file.exists()}, size=${file.length()}")
-                if (file.exists() && file.length() > 0) {
-                    val fileSize = file.length()
-                    val ext = file.extension.lowercase()
-                    if (ext in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")) {
-                        val mimeType = when (ext) {
-                            "jpg", "jpeg" -> "image/jpeg"
-                            "png" -> "image/png"
-                            "gif" -> "image/gif"
-                            "webp" -> "image/webp"
-                            "bmp" -> "image/bmp"
-                            else -> "image/webp"
-                        }
-                        android.util.Log.d("CreativeRepository", "✅ Создание thumbnail_file: ${file.name}, размер: ${fileSize} bytes, тип: $mimeType")
-                        try {
-                            val requestFile = file.asRequestBody(mimeType.toMediaType())
-                            MultipartBody.Part.createFormData("thumbnail_file", file.name, requestFile)
+            // Отправляем URL файла как текстовое поле
+            val downloadUrlBody = downloadUrl?.toRequestBody(null)
+            
+            // Повтор при ошибке соединения (максимум 3 попытки)
+            var lastException: Exception? = null
+            var attempts = 0
+            val maxAttempts = 3
+            var response: retrofit2.Response<com.spyservice.mobile.data.model.CreativeResponse>? = null
+            
+            InAppLogger.d(Logger.Tags.REPOSITORY, "📤 Начинаем отправку на сервер (URL: ${capturedCreative.landingUrl})...")
+            
+            // Используем withTimeout для предотвращения зависания
+            while (attempts < maxAttempts && response == null) {
+                attempts++
+                InAppLogger.d(Logger.Tags.REPOSITORY, "🔄 Попытка $attempts/$maxAttempts отправки на сервер...")
+                try {
+                    InAppLogger.d(Logger.Tags.REPOSITORY, "📡 Вызов API createCreative...")
+                    InAppLogger.d(Logger.Tags.REPOSITORY, "📤 Отправляемые данные: landingUrl=${capturedCreative.landingUrl}, downloadUrl=$downloadUrl")
+                    
+                    // Ждем ответа от сервера без ограничения по времени (таймауты настроены в OkHttpClient)
+                    response = api.createCreative(
+                        title = titleBody,
+                        description = descriptionBody,
+                        format = formatBody,
+                        type = typeBody,
+                        placement = placementBody,
+                        country = countryBody,
+                        platform = platformBody,
+                        cloaking = cloakingBody,
+                        landingUrl = landingUrlBody,
+                        sourceLink = sourceLinkBody,
+                        sourceDevice = sourceDeviceBody,
+                        capturedAt = capturedAtBody,
+                        downloadUrl = downloadUrlBody, // URL файла из Supabase Storage
+                        mediaFile = mediaFile,
+                        thumbnailFile = thumbnailFile
+                    )
+                    
+                    // Логируем детали ответа
+                    val responseCode = response.code()
+                    val responseMessage = response.message()
+                    val contentType = response.headers()["Content-Type"] ?: "unknown"
+                    
+                    InAppLogger.d(Logger.Tags.REPOSITORY, "📥 Ответ сервера: код=$responseCode, сообщение=$responseMessage, Content-Type=$contentType")
+                    
+                    if (response.isSuccessful) {
+                        InAppLogger.success(Logger.Tags.REPOSITORY, "✅ Получен успешный ответ от сервера (код $responseCode)")
+                        // Response body будет автоматически распарсен Retrofit через GsonConverterFactory
+                        // Детальное логирование response body выполняется через HttpLoggingInterceptor (уровень BODY)
+                    } else {
+                        // Для ошибок читаем errorBody
+                        val errorBodyString = try {
+                            response.errorBody()?.string() ?: "empty error body"
                         } catch (e: Exception) {
-                            android.util.Log.e("CreativeRepository", "❌ Ошибка создания RequestBody для thumbnailFile: ${e.message}", e)
-                            null
+                            "error reading error body: ${e.message}"
                         }
+                        InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка сервера: код=$responseCode, тело: $errorBodyString")
+                    }
+                    
+                    break
+                } catch (e: Exception) {
+                    lastException = e
+                    val errorMessage = e.message ?: ""
+                    
+                    // Проверяем, является ли это ошибкой парсинга JSON
+                    val isJsonError = e.message?.contains("MalformedJsonException", ignoreCase = true) == true ||
+                                    e.message?.contains("JsonReader", ignoreCase = true) == true ||
+                                    e is com.google.gson.JsonSyntaxException ||
+                                    e is com.google.gson.stream.MalformedJsonException
+                    
+                    if (isJsonError) {
+                        // Пытаемся получить raw ответ от сервера
+                        try {
+                            val rawResponse = response
+                            if (rawResponse != null) {
+                                val errorBody = rawResponse.errorBody()?.string() ?: "empty"
+                                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка парсинга JSON. Код ответа: ${rawResponse.code()}, тело: $errorBody")
+                            }
+                        } catch (ex: Exception) {
+                            InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Не удалось прочитать ответ сервера: ${ex.message}")
+                        }
+                    }
+                    
+                    InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка при попытке $attempts: ${e.javaClass.simpleName} - ${e.message}", e)
+                    
+                    val isConnectionError = errorMessage.contains("connection closed", ignoreCase = true) ||
+                                         errorMessage.contains("socket closed", ignoreCase = true) ||
+                                         errorMessage.contains("connection reset", ignoreCase = true) ||
+                                         errorMessage.contains("failed to connect", ignoreCase = true) ||
+                                         errorMessage.contains("timeout", ignoreCase = true) ||
+                                         e is java.net.SocketException ||
+                                         e is java.net.SocketTimeoutException ||
+                                         e is java.io.IOException
+                    
+                    // Если это ошибка JSON и не последняя попытка, повторяем
+                    if ((isConnectionError || isJsonError) && attempts < maxAttempts) {
+                        val delayMs = (attempts * 2000).toLong()
+                        InAppLogger.d(Logger.Tags.REPOSITORY, "⏳ Ошибка ${if (isJsonError) "парсинга JSON" else "соединения"}, повтор через ${delayMs}ms...")
+                        kotlinx.coroutines.delay(delayMs)
                     } else {
-                        android.util.Log.w("CreativeRepository", "❌ thumbnailFile не является изображением: $ext")
-                        null
+                        InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Критическая ошибка при вызове API: ${e.message}", e)
+                        e.printStackTrace()
+                        return@withContext false
                     }
-                } else {
-                    android.util.Log.w("CreativeRepository", "❌ thumbnailFile не существует или пустой: exists=${file.exists()}, size=${file.length()}")
-                    null
                 }
-            } ?: run {
-                android.util.Log.w("CreativeRepository", "⚠️ thumbnailFile отсутствует - thumbnail_file не будет отправлен")
-                android.util.Log.d("CreativeRepository", "thumbnailFile в capturedCreative: ${capturedCreative.thumbnailFile?.absolutePath}")
-                null
             }
             
-            // zip_file - архив страницы (MHTML или ZIP)
-            // УБИРАЕМ ВСЕ ОГРАНИЧЕНИЯ - Supabase поддерживает файлы до 50MB
-            val zipFile = capturedCreative.pageArchiveFile?.let { file ->
-                if (file.exists() && file.length() > 0) {
-                    val fileSize = file.length()
-                    
-                    // Определяем MIME тип по расширению файла
-                    val mimeType = when (file.extension.lowercase()) {
-                        "mhtml" -> "message/rfc822" // MHTML формат
-                        "zip" -> "application/zip"
-                        else -> "application/zip" // По умолчанию ZIP
-                    }
-                    
-                    InAppLogger.d(Logger.Tags.REPOSITORY, "✅ Архив готов к отправке: ${file.name}, размер: ${fileSize / 1024} KB")
-                    android.util.Log.d("CreativeRepository", "✅ Архив готов к отправке: ${file.name}, размер: ${fileSize / 1024} KB")
-                    
-                    val requestFile = file.asRequestBody(mimeType.toMediaType())
-                    MultipartBody.Part.createFormData("zip_file", file.name, requestFile)
-                } else {
-                    null
-                }
-            } ?: run {
-                InAppLogger.d(Logger.Tags.REPOSITORY, "📦 Архив отсутствует")
-                null
+            if (response == null) {
+                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Не удалось отправить данные после $maxAttempts попыток")
+                return@withContext false
             }
-            
-            if (thumbnailFile == null) {
-                InAppLogger.w(Logger.Tags.REPOSITORY, "⚠️ thumbnail_file отсутствует - скриншот не будет отправлен")
-                android.util.Log.w("CreativeRepository", "⚠️ thumbnail_file отсутствует - скриншот не будет отправлен")
-            } else {
-                InAppLogger.d(Logger.Tags.REPOSITORY, "✅ thumbnail_file готов к отправке")
-                android.util.Log.d("CreativeRepository", "✅ thumbnail_file готов к отправке")
-            }
-            
-            // Отправка запроса
-            InAppLogger.d(Logger.Tags.REPOSITORY, "📤 Подготовка к отправке на сервер...")
-            InAppLogger.d(Logger.Tags.REPOSITORY, "📋 Данные: title=${capturedCreative.title}, url=${capturedCreative.landingUrl}")
-            InAppLogger.d(Logger.Tags.REPOSITORY, "📁 Файлы: mediaFile=${mediaFile != null}, thumbnailFile=${thumbnailFile != null}, zipFile=${zipFile != null}")
-            android.util.Log.d("CreativeRepository", "📤 Подготовка к отправке на сервер...")
-            android.util.Log.d("CreativeRepository", "📋 Данные: title=${capturedCreative.title}, url=${capturedCreative.landingUrl}")
-            android.util.Log.d("CreativeRepository", "📁 Файлы: mediaFile=${mediaFile != null}, thumbnailFile=${thumbnailFile != null}, zipFile=${zipFile != null}")
-            
-            val response = try {
-                InAppLogger.d(Logger.Tags.REPOSITORY, "🌐 Вызов API createCreative...")
-                android.util.Log.d("CreativeRepository", "🌐 Вызов API createCreative...")
-                api.createCreative(
-                    title = titleBody,
-                    description = descriptionBody,
-                    format = formatBody,
-                    type = typeBody,
-                    placement = placementBody,
-                    country = countryBody,
-                    platform = platformBody,
-                    cloaking = cloakingBody,
-                    landingUrl = landingUrlBody,
-                    sourceLink = sourceLinkBody,
-                    sourceDevice = sourceDeviceBody,
-                    capturedAt = capturedAtBody,
-                    mediaFile = mediaFile,
-                    thumbnailFile = thumbnailFile,
-                    zipFile = zipFile
-                )
-            } catch (e: Exception) {
-                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка при вызове API: ${e.message}", e)
-                android.util.Log.e("CreativeRepository", "❌ Ошибка при вызове API: ${e.message}", e)
-                android.util.Log.e("CreativeRepository", "❌ Тип ошибки: ${e.javaClass.simpleName}")
-                e.printStackTrace()
-                return false
-            }
-            
-            InAppLogger.d(Logger.Tags.REPOSITORY, "📥 Ответ получен: isSuccessful=${response.isSuccessful}, code=${response.code()}")
-            android.util.Log.d("CreativeRepository", "📥 Ответ получен: isSuccessful=${response.isSuccessful}, code=${response.code()}")
             
             if (!response.isSuccessful) {
                 val errorBody = response.errorBody()?.string()
-                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка сервера: код=${response.code()}, сообщение=${response.message()}")
-                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Тело ошибки: $errorBody")
-                android.util.Log.e("CreativeRepository", "❌ Ошибка сервера: код=${response.code()}, сообщение=${response.message()}")
-                android.util.Log.e("CreativeRepository", "❌ Тело ошибки: $errorBody")
-                return false
-            } else {
-                InAppLogger.success(Logger.Tags.REPOSITORY, "✅ Успешная отправка на сервер!")
-                android.util.Log.d("CreativeRepository", "✅ Успешная отправка на сервер!")
-                return true
+                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Ошибка сервера: код=${response.code()}, сообщение=${response.message()}, тело: $errorBody")
+                return@withContext false
             }
-        } catch (e: Exception) {
-            InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Критическая ошибка в uploadCapturedCreative: ${e.message}", e)
-            android.util.Log.e("CreativeRepository", "❌ Критическая ошибка в uploadCapturedCreative: ${e.message}", e)
-            android.util.Log.e("CreativeRepository", "❌ Тип ошибки: ${e.javaClass.simpleName}")
-            e.printStackTrace()
-            false
+            
+            InAppLogger.success(Logger.Tags.REPOSITORY, "✅ Креатив успешно отправлен на сервер")
+            true
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Загрузка отменена: ${e.message}", e)
+                false
+            } catch (e: Exception) {
+                InAppLogger.e(Logger.Tags.REPOSITORY, "❌ Критическая ошибка в uploadCapturedCreative: ${e.message}", e)
+                false
+            }
         }
     }
     
@@ -426,10 +431,9 @@ class CreativeRepository(
                 MultipartBody.Part.createFormData("thumbnail_file", file.name, requestFile)
             }
             
-            val zipPart = creativeData.zip_file?.let { file ->
-                val requestFile = file.asRequestBody("application/zip".toMediaType())
-                MultipartBody.Part.createFormData("zip_file", file.name, requestFile)
-            }
+            // zipFile больше не используется - все файлы страниц загружаются напрямую в Supabase Storage
+            // Для этого метода downloadUrl не используется (старый метод для веб-интерфейса)
+            val downloadUrlBody: okhttp3.RequestBody? = null
             
             val response = api.createCreative(
                 title = titleBody,
@@ -444,9 +448,9 @@ class CreativeRepository(
                 sourceLink = sourceLinkBody,
                 sourceDevice = sourceDeviceBody,
                 capturedAt = capturedAtBody,
+                downloadUrl = downloadUrlBody,
                 mediaFile = mediaPart,
-                thumbnailFile = thumbnailPart,
-                zipFile = zipPart
+                thumbnailFile = thumbnailPart
             )
             
             if (response.isSuccessful) {

@@ -25,9 +25,9 @@ interface CreativeApi {
         @Part("source_link") sourceLink: RequestBody?,
         @Part("source_device") sourceDevice: RequestBody,
         @Part("captured_at") capturedAt: RequestBody?,
+        @Part("download_url") downloadUrl: RequestBody?, // URL файла из Supabase Storage
         @Part mediaFile: MultipartBody.Part?,
-        @Part thumbnailFile: MultipartBody.Part?,
-        @Part zipFile: MultipartBody.Part?
+        @Part thumbnailFile: MultipartBody.Part?
     ): Response<CreativeResponse>
 }
 

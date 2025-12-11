@@ -87,9 +87,10 @@ class ScreenshotPermissionActivity : AppCompatActivity() {
                 app.screenshotService = screenshotServiceForRepo
                 
                 // Обновить сервис в репозитории
+                // Передаем this (ScreenshotPermissionActivity) для открытия файлового менеджера
                 app.creativeRepository.initializeCaptureServices(
                     null, // Accessibility service
-                    screenshotServiceForRepo
+                    this // Activity для файлового менеджера
                 )
                 
                 Log.d(TAG, "Screenshot service saved to Application")
