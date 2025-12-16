@@ -215,7 +215,6 @@ export async function POST(request: NextRequest) {
       media_url: mediaUrl,
       thumbnail_url: thumbnailUrl,
       hasDownloadUrl: !!downloadUrl,
-      hasZipFile: !!zipFile,
       newStatus: updateData.status || existingCreative?.status || 'draft'
     })
 
