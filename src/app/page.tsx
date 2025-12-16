@@ -88,6 +88,12 @@ export default function HomePage() {
     cloaking: ''
   })
   
+  // Пагинация
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const itemsPerPage = 30
+  
   const [showDateDropdown, setShowDateDropdown] = useState(false)
   const [modalAdSettings, setModalAdSettings] = useState<any | null>(null)
   const [selectedCreative, setSelectedCreative] = useState<Creative | null>(null)
@@ -264,6 +270,54 @@ export default function HomePage() {
   useEffect(() => {
     loadData()
   }, [])
+  
+  // Функция для перехода на страницу
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      loadDataWithFilters(page)
+    }
+  }
+  
+  // Функция для загрузки данных с фильтрами
+  const loadDataWithFilters = async (page = 1) => {
+    setLoading(true)
+    try {
+      // Создаем URL с параметрами фильтрации и пагинации
+      const params = new URLSearchParams()
+      params.set('page', page.toString())
+      params.set('limit', itemsPerPage.toString())
+      
+      if (filters.dateFrom) params.set('dateFrom', filters.dateFrom)
+      if (filters.dateTo) params.set('dateTo', filters.dateTo)
+      if (filters.format) params.set('format', filters.format)
+      if (filters.type) params.set('type', filters.type)
+      if (filters.placement) params.set('placement', filters.placement)
+      if (filters.country) params.set('country', filters.country)
+      if (filters.platform) params.set('platform', filters.platform)
+      if (filters.cloaking) params.set('cloaking', filters.cloaking)
+
+      // Load creatives with pagination
+      const creativesResponse = await fetch(`/api/creatives?${params.toString()}`)
+      if (creativesResponse.ok) {
+        const creativesData = await creativesResponse.json()
+        if (creativesData.success) {
+          setCreatives(creativesData.creatives || [])
+          setTotalCount(creativesData.total || 0)
+          setTotalPages(creativesData.totalPages || 1)
+          setCurrentPage(page)
+        } else {
+          // Fallback для демо-данных
+          setCreatives(creativesData.creatives || [])
+          setTotalCount(1)
+          setTotalPages(1)
+          setCurrentPage(1)
+        }
+      }
+    } catch (error) {
+      console.error('Error loading data with filters:', error)
+    }
+    setLoading(false)
+  }
 
   const loadData = async () => {
     try {
@@ -304,17 +358,8 @@ export default function HomePage() {
       }
       if (countriesRes.ok) setCountries(await countriesRes.json())
 
-      // Загружаем креативы (только опубликованные)
-      const creativesRes = await fetch(`${supabaseUrl}/rest/v1/creatives?select=*,formats(name,code),types(name,code),placements(name,code),countries(name),platforms(name,code)&status=eq.published&limit=30&order=captured_at.desc`, {
-        headers: { apikey: supabaseKey }
-      })
-      
-      if (creativesRes.ok) {
-        const data = await creativesRes.json()
-        console.log('Loaded creatives from Supabase:', data)
-        // Убираем фильтрацию на этапе загрузки, чтобы увидеть все данные
-        setCreatives(data)
-      }
+      // Загружаем креативы через API с пагинацией
+      await loadDataWithFilters(1)
     } catch (error) {
       console.error('Error loading data:', error)
       loadDemoData()
@@ -371,164 +416,9 @@ export default function HomePage() {
   }
 
   const applyFilters = async () => {
-    setLoading(true)
-    try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-      
-      if (!supabaseUrl || !supabaseKey) {
-        // Фильтрация демо-данных
-        let filtered = [
-          {
-            id: '1',
-            title: 'Escribí tu consulta',
-            description: 'Crypto advertisement creative from Argentina',
-            captured_at: '2025-11-11T18:34:10.192+00:00',
-            cloaking: false,
-            formats: { name: 'Teaser', code: 'teaser' },
-            types: { name: 'Crypt', code: 'crypt' },
-            placements: { name: 'Demand Gen', code: 'demand_gen' },
-            countries: { name: 'Argentina' },
-            platforms: { name: 'Web', code: 'web' },
-            country_code: 'AR',
-            media_url: 'https://oilwcbfyhutzyjzlqbuk.supabase.co/storage/v1/object/public/creatives-media/1762886048692-2de5ce8a-1fc7-4166-a1ec-5faef0f3e230.webp',
-            thumbnail_url: 'https://oilwcbfyhutzyjzlqbuk.supabase.co/storage/v1/object/public/creatives-media/thumbs/1762886049361-3074abdf-c47a-484e-9f87-8e369ee24cb1.webp',
-            download_url: 'https://oilwcbfyhutzyjzlqbuk.supabase.co/storage/v1/object/public/creatives-media/archives/1762886049789-1762882033.zip',
-            source_link: 'https://f5spy.com/viewer/4480/view'
-          }
-        ]
-        
-        // Простая фильтрация для демо - используем UTC
-        if (filters.dateFrom) {
-          const fromDate = new Date(filters.dateFrom + 'T00:00:00Z')
-          const creativeDate = new Date(filtered[0]?.captured_at)
-          if (creativeDate < fromDate) filtered = []
-        }
-        if (filters.dateTo) {
-          const toDate = new Date(filters.dateTo + 'T23:59:59Z')
-          const creativeDate = new Date(filtered[0]?.captured_at)
-          if (creativeDate > toDate) filtered = []
-        }
-        if (filters.format && filters.format !== 'teaser') filtered = []
-        if (filters.type && filters.type !== 'crypt') filtered = []
-        if (filters.placement && filters.placement !== 'demand_gen') filtered = []
-        if (filters.country && filters.country !== 'AR') filtered = []
-        // Убрана фильтрация по платформе - показываем все креативы
-        // if (filters.platform && filters.platform !== 'web') filtered = []
-        if (filters.cloaking) {
-          const cloakingFilter = filters.cloaking === 'true'
-          if (filtered[0]?.cloaking !== cloakingFilter) filtered = []
-        }
-        
-        console.log('Demo filters applied:', filters)
-        console.log('Demo creative date:', filtered[0]?.captured_at)
-        console.log('Demo filtered results:', filtered)
-        setCreatives(filtered)
-        setLoading(false)
-        return
-      }
-
-      // Строим URL с фильтрами для Supabase (только опубликованные)
-      let url = `${supabaseUrl}/rest/v1/creatives?select=*,formats(name,code),types(name,code),placements(name,code),countries(name),platforms(name,code)&status=eq.published&order=captured_at.desc`
-      
-      // Фильтрация по датам - используем UTC для корректной работы с часовыми поясами
-      if (filters.dateFrom && filters.dateTo) {
-        // Диапазон дат в UTC
-        const fromDateTime = `${filters.dateFrom}T00:00:00Z`
-        const toDateTime = `${filters.dateTo}T23:59:59Z`
-        url += `&and=(captured_at.gte.${fromDateTime},captured_at.lte.${toDateTime})`
-      } else if (filters.dateFrom) {
-        url += `&captured_at=gte.${filters.dateFrom}T00:00:00Z`
-      } else if (filters.dateTo) {
-        url += `&captured_at=lte.${filters.dateTo}T23:59:59Z`
-      }
-      
-      const params = new URLSearchParams()
-      if (filters.country) {
-        params.append('country_code', `eq.${filters.country}`)
-      }
-      if (filters.cloaking) {
-        params.append('cloaking', `eq.${filters.cloaking === 'true'}`)
-      }
-      
-      // Для связанных таблиц нужно получить ID сначала
-      let formatId = null
-      let typeId = null
-      let placementId = null
-      let platformId = null
-      
-      // Получаем ID для фильтров
-      if (filters.format) {
-        const formatResponse = await fetch(`${supabaseUrl}/rest/v1/formats?code=eq.${filters.format}&select=id`, {
-          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-        })
-        const formatData = await formatResponse.json()
-        if (formatData && formatData.length > 0) {
-          formatId = formatData[0].id
-          params.append('format_id', `eq.${formatId}`)
-        }
-      }
-      
-      if (filters.type) {
-        const typeResponse = await fetch(`${supabaseUrl}/rest/v1/types?code=eq.${filters.type}&select=id`, {
-          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-        })
-        const typeData = await typeResponse.json()
-        if (typeData && typeData.length > 0) {
-          typeId = typeData[0].id
-          params.append('type_id', `eq.${typeId}`)
-        }
-      }
-      
-      if (filters.placement) {
-        const placementResponse = await fetch(`${supabaseUrl}/rest/v1/placements?code=eq.${filters.placement}&select=id`, {
-          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-        })
-        const placementData = await placementResponse.json()
-        if (placementData && placementData.length > 0) {
-          placementId = placementData[0].id
-          params.append('placement_id', `eq.${placementId}`)
-        }
-      }
-      
-      if (filters.platform) {
-        const platformResponse = await fetch(`${supabaseUrl}/rest/v1/platforms?code=eq.${filters.platform}&select=id`, {
-          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-        })
-        const platformData = await platformResponse.json()
-        if (platformData && platformData.length > 0) {
-          platformId = platformData[0].id
-          params.append('platform_id', `eq.${platformId}`)
-        }
-      }
-      
-      if (params.toString()) {
-        url += '&' + params.toString()
-      }
-      
-      url += '&limit=30'
-
-      console.log('Filter URL:', url)
-      console.log('Applied filters:', filters)
-      console.log('Date range:', {
-        from: filters.dateFrom ? `${filters.dateFrom}T00:00:00` : null,
-        to: filters.dateTo ? `${filters.dateTo}T23:59:59` : null
-      })
-
-      const response = await fetch(url, {
-        headers: { apikey: supabaseKey }
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        console.log('Filtered creatives:', data)
-        setCreatives(data)
-      }
-    } catch (error) {
-      console.error('Error applying filters:', error)
-    } finally {
-      setLoading(false)
-    }
+    // Сбрасываем на первую страницу при применении фильтров
+    setCurrentPage(1)
+    await loadDataWithFilters(1)
   }
 
   return (
@@ -757,14 +647,17 @@ export default function HomePage() {
                     platform: '',
                     cloaking: ''
                   })
-                  loadData()
+                  loadDataWithFilters(1)
                 }}
                 className="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded transition-colors"
               >
                 Reset
               </button>
               <button 
-                onClick={applyFilters}
+                onClick={() => {
+                  setCurrentPage(1)
+                  applyFilters()
+                }}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
               >
                 Apply
@@ -914,15 +807,23 @@ export default function HomePage() {
 
         {/* Pagination */}
         <div className="flex justify-center items-center space-x-4 mt-12">
-          <button className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors">
+          <button 
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage <= 1}
+            className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
+          >
             Previous
           </button>
           
           <span className="text-gray-400">
-            Page 1 of 34
+            Page {currentPage} of {totalPages} ({totalCount} total)
           </span>
           
-          <button className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors">
+          <button 
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage >= totalPages}
+            className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
+          >
             Next
           </button>
         </div>
@@ -951,7 +852,7 @@ export default function HomePage() {
                     className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
                   >
                     <span>📥</span>
-                    <span>Download zip</span>
+                    <span>Download Archive</span>
                   </a>
                 )}
                 {selectedCreative.source_link && (
@@ -1175,28 +1076,223 @@ export default function HomePage() {
                 </div>
               )}
 
-              {/* Screenshot Thumbnail - Full Width */}
-              {selectedCreative.thumbnail_url && (
-                <div className="mt-4 w-full">
-                  <div className="text-sm text-gray-400 mb-2 text-center">Screen page</div>
-                  <div 
-                    className="relative overflow-hidden rounded-lg border border-gray-700 cursor-pointer group w-full"
-                    onClick={(e) => {
+              {/* Page Preview Button - Bottom */}
+              {selectedCreative.download_url && (
+                <div className="mt-6 w-full border-t border-gray-700 pt-4">
+                  <button
+                    onClick={async (e) => {
                       e.stopPropagation()
-                      console.log('Screenshot clicked, opening full view')
-                      setShowFullScreenshot(true)
+                      try {
+                        // Загружаем файл в кеш браузера
+                        const response = await fetch(selectedCreative.download_url!)
+                        if (!response.ok) {
+                          throw new Error('Failed to load file')
+                        }
+                        
+                        // Получаем текст файла
+                        const text = await response.text()
+                        
+                        // Проверяем, это MHTML или обычный HTML
+                        let htmlContent = text
+                        
+                        if (text.includes('Content-Type: multipart/related') || text.includes('boundary=')) {
+                          // Это MHTML, извлекаем HTML и CSS
+                          const boundaryMatch = text.match(/boundary=["']?([^"'\s;]+)["']?/i)
+                          const cssResources = new Map()
+                          
+                          if (boundaryMatch) {
+                            const boundary = `--${boundaryMatch[1]}`
+                            const parts = text.split(boundary)
+                            
+                            // Сначала собираем все CSS ресурсы
+                            for (const part of parts) {
+                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                ? part.indexOf('\r\n\r\n') + 4
+                                : part.indexOf('\n\n') !== -1
+                                ? part.indexOf('\n\n') + 2
+                                : -1
+                              
+                              if (headerEnd === -1) continue
+                              
+                              const headers = part.substring(0, headerEnd).toLowerCase()
+                              const body = part.substring(headerEnd).trim()
+                              
+                              // Ищем CSS файлы
+                              if (headers.includes('content-type: text/css')) {
+                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
+                                                     headers.match(/content-id:\s*<([^>]+)>/i)
+                                const location = locationMatch ? locationMatch[1].trim() : null
+                                
+                                if (location && body.length > 0) {
+                                  // Сохраняем CSS контент
+                                  cssResources.set(location, body)
+                                }
+                              }
+                            }
+                            
+                            // Ищем часть с основным HTML контентом
+                            let foundMainHtml = false
+                            for (const part of parts) {
+                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                ? part.indexOf('\r\n\r\n') + 4
+                                : part.indexOf('\n\n') !== -1
+                                ? part.indexOf('\n\n') + 2
+                                : -1
+                              
+                              if (headerEnd === -1) continue
+                              
+                              const headers = part.substring(0, headerEnd).toLowerCase()
+                              const body = part.substring(headerEnd).trim()
+                              
+                              // Ищем HTML блок с Content-Location (основная страница, не iframe)
+                              if (headers.includes('content-type: text/html') && 
+                                  headers.includes('content-location:') &&
+                                  body.includes('<!DOCTYPE')) {
+                                const htmlStart = body.indexOf('<!DOCTYPE')
+                                if (htmlStart !== -1) {
+                                  htmlContent = body.substring(htmlStart)
+                                  // Обрезаем строго по первому </html>
+                                  const htmlEnd = htmlContent.indexOf('</html>')
+                                  if (htmlEnd !== -1) {
+                                    htmlContent = htmlContent.substring(0, htmlEnd + 7)
+                                    foundMainHtml = true
+                                    break
+                                  }
+                                }
+                              }
+                            }
+                            
+                            // Если не нашли через Content-Location, берем первый большой HTML блок
+                            if (!foundMainHtml) {
+                              for (const part of parts) {
+                                const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                  ? part.indexOf('\r\n\r\n') + 4
+                                  : part.indexOf('\n\n') !== -1
+                                  ? part.indexOf('\n\n') + 2
+                                  : -1
+                                
+                                if (headerEnd === -1) continue
+                                
+                                const headers = part.substring(0, headerEnd).toLowerCase()
+                                const body = part.substring(headerEnd).trim()
+                                
+                                if (headers.includes('content-type: text/html') && body.includes('<!DOCTYPE')) {
+                                  const htmlStart = body.indexOf('<!DOCTYPE')
+                                  if (htmlStart !== -1) {
+                                    const candidate = body.substring(htmlStart)
+                                    // Берем самый большой HTML блок (основной контент)
+                                    if (!foundMainHtml || candidate.length > htmlContent.length) {
+                                      htmlContent = candidate
+                                      const htmlEnd = htmlContent.indexOf('</html>')
+                                      if (htmlEnd !== -1) {
+                                        htmlContent = htmlContent.substring(0, htmlEnd + 7)
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                            
+                            // Встраиваем CSS стили в HTML
+                            if (htmlContent && cssResources.size > 0) {
+                              // Находим </head> или создаем head если его нет
+                              let headEnd = htmlContent.indexOf('</head>')
+                              if (headEnd === -1) {
+                                // Если нет </head>, добавляем перед </html>
+                                const htmlEnd = htmlContent.indexOf('</html>')
+                                if (htmlEnd !== -1) {
+                                  htmlContent = htmlContent.substring(0, htmlEnd) + '</head></html>'
+                                  headEnd = htmlContent.indexOf('</head>')
+                                }
+                              }
+                              
+                              if (headEnd !== -1) {
+                                // Создаем блок со стилями
+                                let stylesBlock = ''
+                                cssResources.forEach((cssContent, location) => {
+                                  stylesBlock += `<style data-source="${location}">\n${cssContent}\n</style>\n`
+                                })
+                                
+                                // Вставляем стили перед </head>
+                                htmlContent = htmlContent.substring(0, headEnd) + stylesBlock + htmlContent.substring(headEnd)
+                              }
+                              
+                              // Заменяем ссылки на cid: CSS файлы на встроенные стили
+                              cssResources.forEach((cssContent, location) => {
+                                // Заменяем cid: ссылки в href
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`<link[^>]*href=["']cid:${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`, 'gi'),
+                                  ''
+                                )
+                              })
+                            }
+                          } else {
+                            // Fallback: прямой поиск HTML
+                            const htmlMatch = text.match(/<!DOCTYPE[\s\S]*?<\/html>/i)
+                            if (htmlMatch) {
+                              htmlContent = htmlMatch[0]
+                            }
+                          }
+                          
+                          // Финальная обрезка - строго по первому </html>
+                          const finalHtmlEnd = htmlContent.indexOf('</html>')
+                          if (finalHtmlEnd !== -1) {
+                            htmlContent = htmlContent.substring(0, finalHtmlEnd + 7)
+                          }
+                        }
+                        
+                        // Финальная очистка HTML контента
+                        htmlContent = htmlContent.trim()
+                        
+                        // Строго обрезаем по первому </html> - это гарантирует, что мы не захватим
+                        // дополнительные HTML блоки из других частей MHTML (например, iframe контент)
+                        const strictHtmlEnd = htmlContent.indexOf('</html>')
+                        if (strictHtmlEnd !== -1) {
+                          htmlContent = htmlContent.substring(0, strictHtmlEnd + 7)
+                        }
+                        
+                        // Удаляем все скрипты, которые могут добавлять элементы на страницу
+                        htmlContent = htmlContent.replace(/<script[\s\S]*?<\/script>/gi, '')
+                        
+                        // Проверяем структуру HTML - должно быть: <!DOCTYPE>...<html>...<body>...</body></html>
+                        // Убеждаемся, что после </body> идет только </html>, без лишнего контента
+                        const bodyEndIndex = htmlContent.lastIndexOf('</body>')
+                        const htmlEndIndex = htmlContent.lastIndexOf('</html>')
+                        
+                        if (bodyEndIndex !== -1 && htmlEndIndex !== -1 && htmlEndIndex > bodyEndIndex) {
+                          // Проверяем, что между </body> и </html> нет лишнего контента
+                          const betweenTags = htmlContent.substring(bodyEndIndex + 7, htmlEndIndex).trim()
+                          if (betweenTags.length > 0 && !betweenTags.match(/^[\s\n\r]*$/)) {
+                            // Есть лишний контент между тегами, удаляем его
+                            htmlContent = htmlContent.substring(0, bodyEndIndex + 7) + '\n</html>'
+                          }
+                        }
+                        
+                        // Создаем blob из HTML контента
+                        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
+                        
+                        // Создаем blob URL
+                        const blobUrl = URL.createObjectURL(blob)
+                        
+                        // Открываем в новой вкладке
+                        const newWindow = window.open(blobUrl, '_blank')
+                        
+                        if (!newWindow) {
+                          URL.revokeObjectURL(blobUrl)
+                          alert('Please allow popups to preview the page')
+                        }
+                        
+                        // Blob URL будет автоматически очищен браузером при закрытии вкладки
+                      } catch (error) {
+                        console.error('Error loading page:', error)
+                        alert('Failed to load page preview')
+                      }
                     }}
+                    className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition-colors"
                   >
-                    <img
-                      src={selectedCreative.thumbnail_url}
-                      alt="Screenshot"
-                      className="w-full object-cover transition-opacity group-hover:opacity-90 pointer-events-none"
-                      style={{ maxHeight: '200px', objectPosition: 'top' }}
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-gray-900/80 flex items-end justify-center pb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                      <span className="text-xs text-white">Click to view full size</span>
-                    </div>
-                  </div>
+                    <span>👁️</span>
+                    <span>Preview Page</span>
+                  </button>
                 </div>
               )}
             </div>

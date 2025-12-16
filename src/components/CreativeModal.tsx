@@ -112,13 +112,15 @@ export default function CreativeModal({ creative, isOpen, onClose }: CreativeMod
               {/* Action Buttons */}
               <div className="flex gap-3">
                 {creative.download_url && (
-                  <button
-                    onClick={() => window.open(creative.download_url, '_blank')}
+                  <a
+                    href={creative.download_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
                   >
                     <Download className="w-4 h-4" />
-                    Download zip
-                  </button>
+                    Download Archive
+                  </a>
                 )}
                 
                 {creative.source_link && (

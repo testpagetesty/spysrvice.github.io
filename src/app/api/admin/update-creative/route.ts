@@ -30,16 +30,12 @@ export async function POST(request: NextRequest) {
 
     const mediaFile = formData.get('media_file') as File | null
     const thumbnailFile = formData.get('thumbnail_file') as File | null
-    const zipFile = formData.get('zip_file') as File | null
+    // zipFile больше не обрабатываем - все файлы страниц загружаются напрямую в Supabase Storage
     const deleteFileType = formData.get('delete_file_type') as string | null
 
     console.log('Update creative - received files:', {
       hasMediaFile: !!mediaFile,
-      hasThumbnailFile: !!thumbnailFile,
-      hasZipFile: !!zipFile,
-      zipFileName: zipFile?.name,
-      zipFileSize: zipFile?.size,
-      zipFileType: zipFile?.type
+      hasThumbnailFile: !!thumbnailFile
     })
 
     // Fetch current creative to determine status for moderation reset
@@ -168,43 +164,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (zipFile && zipFile.size > 0) {
-      console.log('Uploading ZIP file for update:', {
-        name: zipFile.name,
-        size: zipFile.size,
-        type: zipFile.type
-      })
-      
-      // Очищаем имя файла от специальных символов
-      const sanitizedFileName = zipFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const zipFileName = `archives/${Date.now()}-${sanitizedFileName}`
-      console.log('ZIP file path:', zipFileName)
-      
-      try {
-        const { data: zipData, error: uploadError } = await supabase.storage
-          .from('creatives-media')
-          .upload(zipFileName, zipFile, {
-            contentType: zipFile.type || 'application/zip',
-            cacheControl: '3600',
-            upsert: false
-          })
-        
-        if (uploadError) {
-          console.error('Zip upload error:', uploadError)
-          console.error('Error details:', JSON.stringify(uploadError, null, 2))
-          // Не блокируем обновление креатива, если ZIP не загрузился
-        } else {
-          console.log('ZIP uploaded successfully:', zipData)
-          const { data: urlData } = supabase.storage.from('creatives-media').getPublicUrl(zipFileName)
-          downloadUrl = urlData.publicUrl
-          console.log('ZIP download URL:', downloadUrl)
-        }
-      } catch (uploadError) {
-        console.error('Exception during ZIP upload:', uploadError)
-        // Не блокируем обновление креатива
-      }
+    // Файлы архивов страниц загружаются напрямую в Supabase Storage
+    // download_url обновляется только через deleteFileType или остается текущим значением
+    if (deleteFileType === 'download') {
+      downloadUrl = null
+      console.log('Download URL will be deleted')
     } else {
-      console.log('No ZIP file provided for update, keeping current download_url:', downloadUrl)
+      console.log('Keeping current download_url:', downloadUrl)
     }
 
     // Prepare update data

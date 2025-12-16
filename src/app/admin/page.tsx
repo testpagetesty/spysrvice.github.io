@@ -857,8 +857,7 @@ export default function AdminPage() {
         if (result.fileUploads?.thumbnail) uploadStatus.push('✅ Скриншот')
         else if (createFiles.thumbnail_file) uploadStatus.push('❌ Скриншот не загружен')
         
-        if (result.fileUploads?.zip) uploadStatus.push('✅ ZIP архив')
-        else if (createFiles.zip_file) uploadStatus.push('❌ ZIP архив не загружен')
+        if (result.fileUploads?.archive) uploadStatus.push('✅ Archive uploaded')
         
         const statusMessage = uploadStatus.length > 0 ? '\n\n' + uploadStatus.join('\n') : ''
         
@@ -2331,11 +2330,13 @@ export default function AdminPage() {
                 {selectedCreative.download_url && (
                   <a
                     href={selectedCreative.download_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     download
                     className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
                   >
                     <span>📥</span>
-                    <span>Download zip</span>
+                    <span>Download Archive</span>
                   </a>
                 )}
                 {selectedCreative.source_link && (
@@ -2460,27 +2461,224 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* Screenshot Thumbnail - Full Width */}
-              {selectedCreative.thumbnail_url && (
-                <div className="mt-4 w-full">
-                  <div className="text-sm text-gray-400 mb-2 text-center">Screen page</div>
-                  <div 
-                    className="relative overflow-hidden rounded-lg border border-gray-700 cursor-pointer group w-full"
-                    onClick={(e) => {
+              {/* Page Preview Button - Bottom */}
+              {selectedCreative.download_url && (
+                <div className="mt-6 w-full border-t border-gray-700 pt-4">
+                  <button
+                    onClick={async (e) => {
                       e.stopPropagation()
-                      setShowFullScreenshot(true)
+                      try {
+                        // Загружаем файл в кеш браузера
+                        const response = await fetch(selectedCreative.download_url!)
+                        if (!response.ok) {
+                          throw new Error('Failed to load file')
+                        }
+                        
+                        // Получаем текст файла
+                        const text = await response.text()
+                        
+                        // Проверяем, это MHTML или обычный HTML
+                        let htmlContent = text
+                        
+                        if (text.includes('Content-Type: multipart/related') || text.includes('boundary=')) {
+                          // Это MHTML, извлекаем HTML и CSS
+                          const boundaryMatch = text.match(/boundary=["']?([^"'\s;]+)["']?/i)
+                          const cssResources = new Map()
+                          
+                          if (boundaryMatch) {
+                            const boundary = `--${boundaryMatch[1]}`
+                            const parts = text.split(boundary)
+                            
+                            // Сначала собираем все CSS ресурсы
+                            for (const part of parts) {
+                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                ? part.indexOf('\r\n\r\n') + 4
+                                : part.indexOf('\n\n') !== -1
+                                ? part.indexOf('\n\n') + 2
+                                : -1
+                              
+                              if (headerEnd === -1) continue
+                              
+                              const headers = part.substring(0, headerEnd).toLowerCase()
+                              const body = part.substring(headerEnd).trim()
+                              
+                              // Ищем CSS файлы
+                              if (headers.includes('content-type: text/css')) {
+                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
+                                                     headers.match(/content-id:\s*<([^>]+)>/i)
+                                const location = locationMatch ? locationMatch[1].trim() : null
+                                
+                                if (location && body.length > 0) {
+                                  // Сохраняем CSS контент
+                                  cssResources.set(location, body)
+                                }
+                              }
+                            }
+                            
+                            // Ищем часть с основным HTML контентом
+                            let foundMainHtml = false
+                            for (const part of parts) {
+                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                ? part.indexOf('\r\n\r\n') + 4
+                                : part.indexOf('\n\n') !== -1
+                                ? part.indexOf('\n\n') + 2
+                                : -1
+                              
+                              if (headerEnd === -1) continue
+                              
+                              const headers = part.substring(0, headerEnd).toLowerCase()
+                              const body = part.substring(headerEnd).trim()
+                              
+                              // Ищем HTML блок с Content-Location (основная страница, не iframe)
+                              if (headers.includes('content-type: text/html') && 
+                                  headers.includes('content-location:') &&
+                                  body.includes('<!DOCTYPE')) {
+                                const htmlStart = body.indexOf('<!DOCTYPE')
+                                if (htmlStart !== -1) {
+                                  htmlContent = body.substring(htmlStart)
+                                  // Обрезаем строго по первому </html>
+                                  const htmlEnd = htmlContent.indexOf('</html>')
+                                  if (htmlEnd !== -1) {
+                                    htmlContent = htmlContent.substring(0, htmlEnd + 7)
+                                    foundMainHtml = true
+                                    break
+                                  }
+                                }
+                              }
+                            }
+                            
+                            // Если не нашли через Content-Location, берем первый большой HTML блок
+                            if (!foundMainHtml) {
+                              for (const part of parts) {
+                                const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                  ? part.indexOf('\r\n\r\n') + 4
+                                  : part.indexOf('\n\n') !== -1
+                                  ? part.indexOf('\n\n') + 2
+                                  : -1
+                                
+                                if (headerEnd === -1) continue
+                                
+                                const headers = part.substring(0, headerEnd).toLowerCase()
+                                const body = part.substring(headerEnd).trim()
+                                
+                                if (headers.includes('content-type: text/html') && body.includes('<!DOCTYPE')) {
+                                  const htmlStart = body.indexOf('<!DOCTYPE')
+                                  if (htmlStart !== -1) {
+                                    const candidate = body.substring(htmlStart)
+                                    // Берем самый большой HTML блок (основной контент)
+                                    if (!foundMainHtml || candidate.length > htmlContent.length) {
+                                      htmlContent = candidate
+                                      const htmlEnd = htmlContent.indexOf('</html>')
+                                      if (htmlEnd !== -1) {
+                                        htmlContent = htmlContent.substring(0, htmlEnd + 7)
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                            
+                            // Встраиваем CSS стили в HTML
+                            if (htmlContent && cssResources.size > 0) {
+                              // Находим </head> или создаем head если его нет
+                              let headEnd = htmlContent.indexOf('</head>')
+                              if (headEnd === -1) {
+                                // Если нет </head>, добавляем перед </html>
+                                const htmlEnd = htmlContent.indexOf('</html>')
+                                if (htmlEnd !== -1) {
+                                  htmlContent = htmlContent.substring(0, htmlEnd) + '</head></html>'
+                                  headEnd = htmlContent.indexOf('</head>')
+                                }
+                              }
+                              
+                              if (headEnd !== -1) {
+                                // Создаем блок со стилями
+                                let stylesBlock = ''
+                                cssResources.forEach((cssContent, location) => {
+                                  stylesBlock += `<style data-source="${location}">\n${cssContent}\n</style>\n`
+                                })
+                                
+                                // Вставляем стили перед </head>
+                                htmlContent = htmlContent.substring(0, headEnd) + stylesBlock + htmlContent.substring(headEnd)
+                              }
+                              
+                              // Заменяем ссылки на cid: CSS файлы на встроенные стили
+                              cssResources.forEach((cssContent, location) => {
+                                // Заменяем cid: ссылки в href
+                                const cidPattern = new RegExp(`cid:${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi')
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`<link[^>]*href=["']cid:${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`, 'gi'),
+                                  ''
+                                )
+                              })
+                            }
+                          } else {
+                            // Fallback: прямой поиск HTML
+                            const htmlMatch = text.match(/<!DOCTYPE[\s\S]*?<\/html>/i)
+                            if (htmlMatch) {
+                              htmlContent = htmlMatch[0]
+                            }
+                          }
+                          
+                          // Финальная обрезка - строго по первому </html>
+                          const finalHtmlEnd = htmlContent.indexOf('</html>')
+                          if (finalHtmlEnd !== -1) {
+                            htmlContent = htmlContent.substring(0, finalHtmlEnd + 7)
+                          }
+                        }
+                        
+                        // Финальная очистка HTML контента
+                        htmlContent = htmlContent.trim()
+                        
+                        // Строго обрезаем по первому </html> - это гарантирует, что мы не захватим
+                        // дополнительные HTML блоки из других частей MHTML (например, iframe контент)
+                        const strictHtmlEnd = htmlContent.indexOf('</html>')
+                        if (strictHtmlEnd !== -1) {
+                          htmlContent = htmlContent.substring(0, strictHtmlEnd + 7)
+                        }
+                        
+                        // Удаляем все скрипты, которые могут добавлять элементы на страницу
+                        htmlContent = htmlContent.replace(/<script[\s\S]*?<\/script>/gi, '')
+                        
+                        // Проверяем структуру HTML - должно быть: <!DOCTYPE>...<html>...<body>...</body></html>
+                        // Убеждаемся, что после </body> идет только </html>, без лишнего контента
+                        const bodyEndIndex = htmlContent.lastIndexOf('</body>')
+                        const htmlEndIndex = htmlContent.lastIndexOf('</html>')
+                        
+                        if (bodyEndIndex !== -1 && htmlEndIndex !== -1 && htmlEndIndex > bodyEndIndex) {
+                          // Проверяем, что между </body> и </html> нет лишнего контента
+                          const betweenTags = htmlContent.substring(bodyEndIndex + 7, htmlEndIndex).trim()
+                          if (betweenTags.length > 0 && !betweenTags.match(/^[\s\n\r]*$/)) {
+                            // Есть лишний контент между тегами, удаляем его
+                            htmlContent = htmlContent.substring(0, bodyEndIndex + 7) + '\n</html>'
+                          }
+                        }
+                        
+                        // Создаем blob из HTML контента
+                        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
+                        
+                        // Создаем blob URL
+                        const blobUrl = URL.createObjectURL(blob)
+                        
+                        // Открываем в новой вкладке
+                        const newWindow = window.open(blobUrl, '_blank')
+                        
+                        if (!newWindow) {
+                          URL.revokeObjectURL(blobUrl)
+                          alert('Please allow popups to preview the page')
+                        }
+                        
+                        // Blob URL будет автоматически очищен браузером при закрытии вкладки
+                      } catch (error) {
+                        console.error('Error loading page:', error)
+                        alert('Failed to load page preview')
+                      }
                     }}
+                    className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition-colors"
                   >
-                    <img
-                      src={selectedCreative.thumbnail_url}
-                      alt="Screenshot"
-                      className="w-full object-cover transition-opacity group-hover:opacity-90 pointer-events-none"
-                      style={{ maxHeight: '200px', objectPosition: 'top' }}
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-gray-900/80 flex items-end justify-center pb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                      <span className="text-xs text-white">Click to view full size</span>
-                    </div>
-                  </div>
+                    <span>👁️</span>
+                    <span>Preview Page</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -2793,37 +2991,39 @@ export default function AdminPage() {
                     <p className="text-xs text-gray-400 mt-1">Скриншот страницы. Форматы: JPG, PNG, GIF, WebP, BMP, TIFF, SVG, AVIF, HEIC</p>
                   </div>
 
-                  {/* ZIP File */}
+                  {/* Archive File - только ссылка на Supabase Storage */}
                   <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2">Archive (ZIP)</label>
-                    {editingCreative.download_url && (
-                      <div className="mb-3 p-3 bg-gray-800 border border-gray-700 rounded flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-2xl">📦</span>
-                          <span className="text-white text-sm">Archive available</span>
+                    {editingCreative.download_url ? (
+                      <div className="mb-3 p-3 bg-gray-800 border border-gray-700 rounded">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl">📦</span>
+                            <span className="text-white text-sm">Archive available</span>
+                          </div>
+                          <button
+                            onClick={() => deleteCreativeFile('download')}
+                            className="bg-red-600 hover:bg-red-700 text-white p-1 rounded"
+                          >
+                            <TrashIcon />
+                          </button>
                         </div>
-                        <button
-                          onClick={() => deleteCreativeFile('download')}
-                          className="bg-red-600 hover:bg-red-700 text-white p-1 rounded"
+                        <a
+                          href={editingCreative.download_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-400 hover:text-blue-300 text-sm underline flex items-center gap-1"
                         >
-                          <TrashIcon />
-                        </button>
+                          <span>Download from Supabase Storage</span>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                        <p className="text-xs text-gray-500 mt-2 break-all">{editingCreative.download_url}</p>
                       </div>
-                    )}
-                    <input
-                      type="file"
-                      accept=".zip,application/zip,application/x-zip-compressed"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0] || null
-                        console.log('ZIP file selected in edit form:', file ? { name: file.name, size: file.size, type: file.type } : 'none')
-                        handleFileChange('zip_file', file)
-                      }}
-                      className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {editFiles.zip_file && (
-                      <div className="mt-2">
-                        <p className="text-sm text-green-400">✅ Новый файл: {editFiles.zip_file.name}</p>
-                        <p className="text-xs text-gray-500">Размер: {(editFiles.zip_file.size / 1024 / 1024).toFixed(2)} MB</p>
+                    ) : (
+                      <div className="mb-3 p-3 bg-gray-800 rounded border border-gray-700">
+                        <p className="text-gray-400 text-sm">No archive available. Archives are uploaded directly to Supabase Storage.</p>
                       </div>
                     )}
                   </div>
