@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import ReactCountryFlag from 'react-country-flag'
 
 // Простые иконки
 const SearchIcon = () => <span>🔍</span>
@@ -9,6 +10,35 @@ const UsersIcon = () => <span>👥</span>
 const EyeIcon = () => <span>👁️</span>
 const CalendarIcon = () => <span>📅</span>
 const ChevronDownIcon = () => <span>▼</span>
+
+// Copy icon - classic double document icon
+const CopyIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+  </svg>
+)
+
+const CheckIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+  </svg>
+)
+
+// Component to render country flag
+const CountryFlag = ({ countryCode }: { countryCode?: string | null }) => {
+  if (!countryCode || countryCode.length !== 2) return null
+  return (
+    <ReactCountryFlag
+      countryCode={countryCode.toUpperCase()}
+      svg
+      style={{
+        width: '1.2em',
+        height: '1.2em',
+      }}
+      title={countryCode}
+    />
+  )
+}
 
 // Типы данных
 interface Creative {
@@ -99,7 +129,22 @@ export default function HomePage() {
   const [selectedCreative, setSelectedCreative] = useState<Creative | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [showFullScreenshot, setShowFullScreenshot] = useState(false)
+  const [copiedField, setCopiedField] = useState<string | null>(null)
   const dateDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Блокируем скролл страницы когда открыта модалка
+  useEffect(() => {
+    if (showModal || showFullScreenshot) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    
+    // Cleanup: восстанавливаем скролл при размонтировании
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [showModal, showFullScreenshot])
 
   const dateFromRef = useRef<DateInputWithPicker | null>(null)
   const dateToRef = useRef<DateInputWithPicker | null>(null)
@@ -185,6 +230,18 @@ export default function HomePage() {
     setSelectedCreative(null)
     setShowFullScreenshot(false)
     setModalAdSettings(null)
+    setCopiedField(null)
+  }
+
+  const copyToClipboard = async (text: string, fieldName: string) => {
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedField(fieldName)
+      setTimeout(() => setCopiedField(null), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
   }
 
   const filterByCloaking = (cloakingValue: boolean | null) => {
@@ -425,16 +482,13 @@ export default function HomePage() {
     <div className="min-h-screen bg-gray-950">
       {/* Header */}
       <header className="bg-gray-900 border-b border-gray-800">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <h1 className="text-2xl font-bold text-white">Spy Service</h1>
-              </div>
-              
-            </div>
-
-            <div className="flex items-center space-x-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          {/* Title and Buttons Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 border-b border-gray-800 gap-4">
+            <h1 className="text-xl sm:text-2xl font-bold text-white">Spy Service</h1>
+            
+            {/* Buttons - Mobile: centered, PC: right aligned */}
+            <div className="flex items-center justify-center sm:justify-end space-x-2 sm:space-x-4">
               <button
                 onClick={toggleTheme}
                 className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
@@ -751,7 +805,10 @@ export default function HomePage() {
                     
                     <div className="flex justify-between">
                       <span>Country:</span>
-                      <span className="text-gray-300">{creative.countries?.name || '-'}</span>
+                      <span className="text-gray-300 flex items-center gap-1.5">
+                        <CountryFlag countryCode={creative.country_code || creative.countries?.code} />
+                        {creative.countries?.name || '-'}
+                      </span>
                     </div>
                     
                     <div className="flex justify-between">
@@ -844,7 +901,7 @@ export default function HomePage() {
               <h2 className="text-2xl font-bold text-white">
                 {selectedCreative.title || 'Creative Details'}
               </h2>
-              <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-3">
                 {selectedCreative.download_url && (
                   <a
                     href={selectedCreative.download_url}
@@ -854,6 +911,692 @@ export default function HomePage() {
                     <span>📥</span>
                     <span>Download Archive</span>
                   </a>
+                )}
+                {selectedCreative.download_url && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation()
+                      try {
+                        // Показываем индикатор загрузки (опционально)
+                        const button = e.currentTarget
+                        const originalText = button.innerHTML
+                        button.disabled = true
+                        button.innerHTML = '<span>⏳ Loading...</span>'
+                        
+                        // Загружаем файл в кеш браузера
+                        const response = await fetch(selectedCreative.download_url!)
+                        if (!response.ok) {
+                          throw new Error('Failed to load file')
+                        }
+                        
+                        // Получаем текст файла
+                        const text = await response.text()
+                        
+                        // Восстанавливаем кнопку
+                        button.disabled = false
+                        button.innerHTML = originalText
+                        
+                        // Проверяем, что мы получили контент
+                        if (!text || text.length === 0) {
+                          throw new Error('File content is empty')
+                        }
+                        
+                        // Проверяем, это MHTML или обычный HTML
+                        let htmlContent = text
+                        
+                        if (text.includes('Content-Type: multipart/related') || text.includes('boundary=')) {
+                          // Это MHTML, извлекаем HTML и CSS
+                          // Ищем boundary в заголовке MHTML
+                          let boundaryMatch = text.match(/boundary=["']?([^"'\s;]+)["']?/i)
+                          
+                          // Если не нашли в первой строке, ищем в Content-Type
+                          if (!boundaryMatch) {
+                            const contentTypeMatch = text.match(/Content-Type:\s*multipart\/related[^]*?boundary=["']?([^"'\s;]+)["']?/i)
+                            if (contentTypeMatch) {
+                              boundaryMatch = contentTypeMatch
+                            }
+                          }
+                          
+                          const cssResources = new Map()
+                          const imageResources = new Map()
+                          
+                          if (boundaryMatch) {
+                            const boundary = `--${boundaryMatch[1]}`
+                            // Разделяем на части, но пропускаем первую часть (заголовки MHTML)
+                            const allParts = text.split(boundary)
+                            // Пропускаем первую часть (заголовки MHTML) и последнюю (пустая строка после последнего boundary)
+                            const parts = allParts.slice(1, allParts.length - 1)
+                            
+                            // Собираем все ресурсы (CSS и изображения)
+                            for (const part of parts) {
+                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                ? part.indexOf('\r\n\r\n') + 4
+                                : part.indexOf('\n\n') !== -1
+                                ? part.indexOf('\n\n') + 2
+                                : -1
+                              
+                              if (headerEnd === -1) continue
+                              
+                              const headers = part.substring(0, headerEnd).toLowerCase()
+                              const body = part.substring(headerEnd).trim()
+                              
+                              // Ищем CSS файлы
+                              if (headers.includes('content-type: text/css')) {
+                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
+                                                     headers.match(/content-id:\s*<([^>]+)>/i)
+                                const location = locationMatch ? locationMatch[1].trim() : null
+                                
+                                if (location && body.length > 0) {
+                                  // Сохраняем CSS контент
+                                  cssResources.set(location, body)
+                                }
+                              }
+                              
+                              // Ищем изображения (jpg, png, gif, webp, svg и т.д.)
+                              if (headers.includes('content-type: image/')) {
+                                const contentTypeMatch = headers.match(/content-type:\s*([^\r\n]+)/i)
+                                const contentType = contentTypeMatch ? contentTypeMatch[1].trim().toLowerCase() : 'image/jpeg'
+                                
+                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
+                                                     headers.match(/content-id:\s*<([^>]+)>/i)
+                                const location = locationMatch ? locationMatch[1].trim() : null
+                                
+                                if (location && body.length > 0) {
+                                  try {
+                                    // Проверяем Content-Transfer-Encoding
+                                    const encodingMatch = headers.match(/content-transfer-encoding:\s*([^\r\n]+)/i)
+                                    const encoding = encodingMatch ? encodingMatch[1].trim().toLowerCase() : ''
+                                    
+                                    let imageData = body.trim()
+                                    
+                                    // Если изображение уже в формате data URI, используем как есть
+                                    if (imageData.startsWith('data:')) {
+                                      imageResources.set(location, imageData)
+                                      continue
+                                    }
+                                    
+                                    // Если encoding = base64 или изображение выглядит как base64
+                                    if (encoding === 'base64' || /^[A-Za-z0-9+/=\s]+$/.test(imageData)) {
+                                      // Удаляем все пробелы и переносы строк из base64
+                                      const cleanBody = imageData.replace(/[\r\n\s]/g, '')
+                                      imageData = `data:${contentType};base64,${cleanBody}`
+                                    } else {
+                                      // Для бинарных данных в браузере нужно использовать другой подход
+                                      // Но обычно в MHTML изображения уже в base64
+                                      // Пробуем использовать как base64
+                                      const cleanBody = imageData.replace(/[\r\n\s]/g, '')
+                                      if (/^[A-Za-z0-9+/=]+$/.test(cleanBody)) {
+                                        imageData = `data:${contentType};base64,${cleanBody}`
+                                      } else {
+                                        // Если не base64, пропускаем (в браузере сложно работать с бинарными данными)
+                                        continue
+                                      }
+                                    }
+                                    
+                                    // Сохраняем изображение
+                                    imageResources.set(location, imageData)
+                                  } catch (e) {
+                                    // Если не удалось обработать изображение, пропускаем его
+                                    continue
+                                  }
+                                }
+                              }
+                            }
+                            
+                            // Ищем часть с основным HTML контентом
+                            let foundMainHtml = false
+                            let mainHtmlContent = ''
+                            let maxHtmlLength = 0
+                            let baseUrl = '' // Базовый URL для разрешения относительных путей
+                            
+                            // Сначала ищем HTML с Content-Location (основная страница, не iframe)
+                            for (const part of parts) {
+                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                ? part.indexOf('\r\n\r\n') + 4
+                                : part.indexOf('\n\n') !== -1
+                                ? part.indexOf('\n\n') + 2
+                                : -1
+                              
+                              if (headerEnd === -1) continue
+                              
+                              const headers = part.substring(0, headerEnd).toLowerCase()
+                              let body = part.substring(headerEnd).trim()
+                              
+                              // Удаляем возможные заголовки MHTML из начала body (если они там остались)
+                              // Ищем начало HTML контента - должно начинаться с <!DOCTYPE или <html
+                              const htmlStartIndex = Math.max(
+                                body.indexOf('<!DOCTYPE'),
+                                body.indexOf('<html')
+                              )
+                              
+                              if (htmlStartIndex > 0) {
+                                // Если HTML начинается не с начала body, обрезаем все заголовки перед ним
+                                body = body.substring(htmlStartIndex)
+                              }
+                              
+                              // Ищем HTML блок с Content-Location (основная страница, не iframe)
+                              // Исключаем iframe контент и другие встроенные элементы
+                              if (headers.includes('content-type: text/html') && 
+                                  headers.includes('content-location:') &&
+                                  (body.includes('<!DOCTYPE') || body.startsWith('<html'))) {
+                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i)
+                                const location = locationMatch ? locationMatch[1].trim() : ''
+                                
+                                // Сохраняем базовый URL
+                                if (location && !baseUrl) {
+                                  try {
+                                    const urlObj = new URL(location)
+                                    baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1)}`
+                                  } catch {
+                                    baseUrl = location.substring(0, location.lastIndexOf('/') + 1)
+                                  }
+                                }
+                                
+                                // Пропускаем iframe, embed и другие встроенные элементы
+                                if (location.includes('iframe') || 
+                                    location.includes('embed') || 
+                                    location.includes('frame') ||
+                                    location.includes('widget') ||
+                                    location.includes('popup')) {
+                                  continue
+                                }
+                                
+                                // Ищем начало HTML (может быть <!DOCTYPE или <html)
+                                const htmlStart = Math.max(
+                                  body.indexOf('<!DOCTYPE'),
+                                  body.indexOf('<html')
+                                )
+                                
+                                if (htmlStart !== -1) {
+                                  const candidate = body.substring(htmlStart)
+                                  const htmlEnd = candidate.indexOf('</html>')
+                                  if (htmlEnd !== -1) {
+                                    const htmlBlock = candidate.substring(0, htmlEnd + 7)
+                                    // Берем самый большой HTML блок с Content-Location
+                                    if (htmlBlock.length > maxHtmlLength) {
+                                      mainHtmlContent = htmlBlock
+                                      maxHtmlLength = htmlBlock.length
+                                      foundMainHtml = true
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                            
+                            // Если нашли через Content-Location, используем его
+                            if (foundMainHtml && mainHtmlContent.length > 0) {
+                              htmlContent = mainHtmlContent
+                            } else {
+                              // Если не нашли через Content-Location, берем самый большой HTML блок
+                              maxHtmlLength = 0
+                              for (const part of parts) {
+                                const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                  ? part.indexOf('\r\n\r\n') + 4
+                                  : part.indexOf('\n\n') !== -1
+                                  ? part.indexOf('\n\n') + 2
+                                  : -1
+                                
+                                if (headerEnd === -1) continue
+                                
+                                const headers = part.substring(0, headerEnd).toLowerCase()
+                                let body = part.substring(headerEnd).trim()
+                                
+                                // Удаляем возможные заголовки MHTML из начала body
+                                const htmlStartIndex = Math.max(
+                                  body.indexOf('<!DOCTYPE'),
+                                  body.indexOf('<html')
+                                )
+                                
+                                if (htmlStartIndex > 0) {
+                                  // Если HTML начинается не с начала body, обрезаем все заголовки перед ним
+                                  body = body.substring(htmlStartIndex)
+                                }
+                                
+                                // Пропускаем части без HTML или с подозрительными заголовками
+                                if (!headers.includes('content-type: text/html') || 
+                                    (!body.includes('<!DOCTYPE') && !body.startsWith('<html'))) {
+                                  continue
+                                }
+                                
+                                // Пропускаем iframe и встроенный контент
+                                if (headers.includes('content-location:')) {
+                                  const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i)
+                                  const location = locationMatch ? locationMatch[1].trim().toLowerCase() : ''
+                                  if (location.includes('iframe') || 
+                                      location.includes('embed') || 
+                                      location.includes('frame') ||
+                                      location.includes('widget') ||
+                                      location.includes('popup')) {
+                                    continue
+                                  }
+                                }
+                                
+                                // Ищем начало HTML (может быть <!DOCTYPE или <html)
+                                const htmlStart = Math.max(
+                                  body.indexOf('<!DOCTYPE'),
+                                  body.indexOf('<html')
+                                )
+                                
+                                if (htmlStart !== -1) {
+                                  const candidate = body.substring(htmlStart)
+                                  const htmlEnd = candidate.indexOf('</html>')
+                                  if (htmlEnd !== -1) {
+                                    const htmlBlock = candidate.substring(0, htmlEnd + 7)
+                                    // Берем самый большой HTML блок (основной контент)
+                                    if (htmlBlock.length > maxHtmlLength && htmlBlock.length > 1000) {
+                                      mainHtmlContent = htmlBlock
+                                      maxHtmlLength = htmlBlock.length
+                                    }
+                                  }
+                                }
+                              }
+                              
+                              if (mainHtmlContent.length > 0) {
+                                htmlContent = mainHtmlContent
+                              }
+                            }
+                            
+                            // Встраиваем CSS стили в HTML
+                            if (htmlContent && cssResources.size > 0) {
+                              // Находим </head> или создаем head если его нет
+                              let headEnd = htmlContent.indexOf('</head>')
+                              if (headEnd === -1) {
+                                // Если нет </head>, добавляем перед </html>
+                                const htmlEnd = htmlContent.indexOf('</html>')
+                                if (htmlEnd !== -1) {
+                                  htmlContent = htmlContent.substring(0, htmlEnd) + '</head></html>'
+                                  headEnd = htmlContent.indexOf('</head>')
+                                }
+                              }
+                              
+                              if (headEnd !== -1) {
+                                // Создаем блок со стилями
+                                let stylesBlock = ''
+                                cssResources.forEach((cssContent, location) => {
+                                  stylesBlock += `<style data-source="${location}">\n${cssContent}\n</style>\n`
+                                })
+                                
+                                // Вставляем стили перед </head>
+                                htmlContent = htmlContent.substring(0, headEnd) + stylesBlock + htmlContent.substring(headEnd)
+                              }
+                              
+                              // Заменяем ссылки на cid: CSS файлы на встроенные стили
+                              cssResources.forEach((cssContent, location) => {
+                                // Заменяем cid: ссылки в href
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`<link[^>]*href=["']cid:${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`, 'gi'),
+                                  ''
+                                )
+                              })
+                            }
+                            
+                            // Функция для разрешения относительных URL
+                            const resolveUrl = (url: string, base: string): string => {
+                              if (!url) return url
+                              
+                              // Если уже абсолютный URL
+                              if (url.startsWith('http://') || url.startsWith('https://')) {
+                                return url
+                              }
+                              
+                              // Если протокол-относительный URL (//example.com/image.jpg)
+                              if (url.startsWith('//')) {
+                                try {
+                                  const baseUrl = new URL(base || 'http://example.com')
+                                  return `${baseUrl.protocol}${url}`
+                                } catch {
+                                  return `https:${url}`
+                                }
+                              }
+                              
+                              // Если абсолютный путь (/image.jpg)
+                              if (url.startsWith('/')) {
+                                try {
+                                  const baseUrl = new URL(base || 'http://example.com')
+                                  return `${baseUrl.protocol}//${baseUrl.host}${url}`
+                                } catch {
+                                  return url
+                                }
+                              }
+                              
+                              // Относительный путь (image.jpg или ../image.jpg)
+                              try {
+                                const baseUrl = new URL(base || 'http://example.com')
+                                return new URL(url, baseUrl).toString()
+                              } catch {
+                                return url
+                              }
+                            }
+                            
+                            // Функция для нормализации URL (для сравнения)
+                            const normalizeUrlForMatch = (url: string): string => {
+                              if (!url) return ''
+                              try {
+                                const urlObj = new URL(url, baseUrl || 'http://example.com')
+                                // Убираем протокол, домен, query и hash для сравнения
+                                return urlObj.pathname.toLowerCase()
+                              } catch {
+                                // Если не URL, возвращаем путь без query и hash
+                                return url.split('?')[0].split('#')[0].toLowerCase()
+                              }
+                            }
+                            
+                            // Заменяем ссылки на изображения из MHTML на встроенные data URIs
+                            if (htmlContent && imageResources.size > 0) {
+                              // Создаем карту нормализованных путей для быстрого поиска
+                              const imageMap = new Map<string, string>()
+                              imageResources.forEach((imageData, location) => {
+                                // Сохраняем оригинальный путь (в разных вариантах регистра)
+                                imageMap.set(location.toLowerCase(), imageData)
+                                imageMap.set(location, imageData)
+                                
+                                // Сохраняем нормализованный путь
+                                const normalized = normalizeUrlForMatch(location)
+                                if (normalized) {
+                                  imageMap.set(normalized, imageData)
+                                  // Также сохраняем с ведущим слешем
+                                  if (!normalized.startsWith('/')) {
+                                    imageMap.set(`/${normalized}`, imageData)
+                                  }
+                                }
+                                
+                                // Сохраняем только имя файла
+                                const fileName = location.split('/').pop()?.split('?')[0]?.toLowerCase()
+                                if (fileName && fileName.includes('.')) {
+                                  imageMap.set(fileName, imageData)
+                                  // Также с разными вариантами пути
+                                  imageMap.set(`./${fileName}`, imageData)
+                                  imageMap.set(`../${fileName}`, imageData)
+                                }
+                                
+                                // Если есть baseUrl, разрешаем относительные пути
+                                if (baseUrl) {
+                                  try {
+                                    const resolved = resolveUrl(location, baseUrl)
+                                    if (resolved !== location) {
+                                      imageMap.set(resolved.toLowerCase(), imageData)
+                                      const resolvedNormalized = normalizeUrlForMatch(resolved)
+                                      if (resolvedNormalized) {
+                                        imageMap.set(resolvedNormalized, imageData)
+                                      }
+                                    }
+                                  } catch (e) {
+                                    // Игнорируем ошибки разрешения URL
+                                  }
+                                }
+                              })
+                              
+                              // Заменяем все ссылки на изображения
+                              imageMap.forEach((imageData, searchKey) => {
+                                // Экранируем для regex
+                                const escaped = searchKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                
+                                // Заменяем в src атрибутах
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(src=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    // Проверяем, что это действительно изображение
+                                    if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                        url.includes('image') || 
+                                        url.match(/data:image/i)) {
+                                      return `${prefix}${imageData}${suffix}`
+                                    }
+                                    return match
+                                  }
+                                )
+                                
+                                // Заменяем в srcset
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(srcset=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    // Проверяем, что это действительно изображение
+                                    if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                        url.includes('image')) {
+                                      return `${prefix}${imageData}${suffix}`
+                                    }
+                                    return match
+                                  }
+                                )
+                                
+                                // Заменяем в data-src (lazy loading)
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(data-src=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    // Проверяем, что это действительно изображение
+                                    if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                        url.includes('image')) {
+                                      return `${prefix}${imageData}${suffix}`
+                                    }
+                                    return match
+                                  }
+                                )
+                                
+                                // Заменяем cid: ссылки
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`cid:${escaped}`, 'gi'),
+                                  imageData
+                                )
+                                
+                                // Заменяем в inline стилях (style="background-image: url(...)")
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(style=["'][^"']*background-image:\\s*url\\(["']?)([^"')]*${escaped}[^"')]*)(["']?\\)[^"']*["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                )
+                                
+                                // Также заменяем в других CSS свойствах со ссылками на изображения
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(style=["'][^"']*:\\s*url\\(["']?)([^"')]*${escaped}[^"')]*)(["']?\\)[^"']*["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    // Проверяем, что это изображение
+                                    if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                        url.includes('image')) {
+                                      return `${prefix}${imageData}${suffix}`
+                                    }
+                                    return match
+                                  }
+                                )
+                              })
+                              
+                              // Также обрабатываем пути в CSS
+                              const updatedCssResources = new Map<string, string>()
+                              cssResources.forEach((cssContent, cssLocation) => {
+                                let updatedCss = cssContent
+                                
+                                // Обрабатываем все возможные варианты путей к изображениям
+                                imageMap.forEach((imageData, searchKey) => {
+                                  const escaped = searchKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                  
+                                  // Заменяем в CSS url() с разными вариантами кавычек и без них
+                                  updatedCss = updatedCss.replace(
+                                    new RegExp(`url\\(["']?[^"')]*${escaped}[^"')]*["']?\\)`, 'gi'),
+                                    `url(${imageData})`
+                                  )
+                                  
+                                  // Также заменяем относительные пути, разрешая их через baseUrl
+                                  if (baseUrl) {
+                                    const resolvedUrl = resolveUrl(searchKey, baseUrl)
+                                    if (resolvedUrl !== searchKey) {
+                                      const resolvedEscaped = resolvedUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                      updatedCss = updatedCss.replace(
+                                        new RegExp(`url\\(["']?[^"')]*${resolvedEscaped}[^"')]*["']?\\)`, 'gi'),
+                                        `url(${imageData})`
+                                      )
+                                    }
+                                  }
+                                })
+                                
+                                updatedCssResources.set(cssLocation, updatedCss)
+                              })
+                              
+                              // Обновляем CSS ресурсы
+                              cssResources.clear()
+                              updatedCssResources.forEach((content, location) => {
+                                cssResources.set(location, content)
+                              })
+                              
+                              // Обновляем CSS в HTML после замены изображений
+                              if (cssResources.size > 0) {
+                                let headEnd = htmlContent.indexOf('</head>')
+                                if (headEnd !== -1) {
+                                  // Находим существующие style теги и обновляем их
+                                  const styleRegex = /<style[^>]*data-source=["']([^"']+)["'][^>]*>([\s\S]*?)<\/style>/gi
+                                  htmlContent = htmlContent.replace(styleRegex, (match, source, content) => {
+                                    const updatedContent = cssResources.get(source) || content
+                                    return `<style data-source="${source}">\n${updatedContent}\n</style>`
+                                  })
+                                }
+                              }
+                            }
+                          } else {
+                            // Fallback: прямой поиск HTML
+                            const htmlMatch = text.match(/<!DOCTYPE[\s\S]*?<\/html>/i)
+                            if (htmlMatch) {
+                              htmlContent = htmlMatch[0]
+                            }
+                          }
+                          
+                          // Проверяем, что HTML контент был найден
+                          if (!htmlContent || htmlContent.trim().length === 0) {
+                            throw new Error('Failed to extract HTML content from MHTML file')
+                          }
+                          
+                          // Финальная обрезка - строго по первому </html>
+                          const finalHtmlEnd = htmlContent.indexOf('</html>')
+                          if (finalHtmlEnd !== -1) {
+                            htmlContent = htmlContent.substring(0, finalHtmlEnd + 7)
+                          }
+                        }
+                        
+                        // Финальная очистка HTML контента
+                        htmlContent = htmlContent.trim()
+                        
+                        // Проверяем, что после очистки контент не пустой
+                        if (!htmlContent || htmlContent.length === 0) {
+                          throw new Error('HTML content is empty after processing')
+                        }
+                        
+                        // Удаляем заголовки MHTML, если они попали в начало HTML (From, Subject, Date и т.д.)
+                        const mhtmlHeadersPattern = /^(From:|Snapshot-Content-Location:|Subject:|Date:|MIME-Version:|Content-Type:|boundary=)[^\n]*\n?/gmi
+                        htmlContent = htmlContent.replace(mhtmlHeadersPattern, '')
+                        
+                        // Ищем начало HTML контента после удаления заголовков
+                        const finalHtmlStart = Math.max(
+                          htmlContent.indexOf('<!DOCTYPE'),
+                          htmlContent.indexOf('<html')
+                        )
+                        
+                        if (finalHtmlStart > 0) {
+                          // Если HTML начинается не с начала, обрезаем все перед ним
+                          htmlContent = htmlContent.substring(finalHtmlStart)
+                        }
+                        
+                        // Строго обрезаем по первому </html> - это гарантирует, что мы не захватим
+                        // дополнительные HTML блоки из других частей MHTML (например, iframe контент)
+                        const strictHtmlEnd = htmlContent.indexOf('</html>')
+                        if (strictHtmlEnd !== -1) {
+                          htmlContent = htmlContent.substring(0, strictHtmlEnd + 7)
+                        }
+                        
+                        // Удаляем все скрипты, которые могут добавлять элементы на страницу
+                        htmlContent = htmlContent.replace(/<script[\s\S]*?<\/script>/gi, '')
+                        
+                        // Проверяем структуру HTML - должно быть: <!DOCTYPE>...<html>...<body>...</body></html>
+                        // Убеждаемся, что после </body> идет только </html>, без лишнего контента
+                        const bodyEndIndex = htmlContent.lastIndexOf('</body>')
+                        const htmlEndIndex = htmlContent.lastIndexOf('</html>')
+                        
+                        if (bodyEndIndex !== -1 && htmlEndIndex !== -1 && htmlEndIndex > bodyEndIndex) {
+                          // Проверяем, что между </body> и </html> нет лишнего контента
+                          const betweenTags = htmlContent.substring(bodyEndIndex + 7, htmlEndIndex).trim()
+                          if (betweenTags.length > 0 && !betweenTags.match(/^[\s\n\r]*$/)) {
+                            // Есть лишний контент между тегами, удаляем его
+                            htmlContent = htmlContent.substring(0, bodyEndIndex + 7) + '\n</html>'
+                          }
+                        }
+                        
+                        // Валидация HTML контента перед созданием blob
+                        if (!htmlContent || htmlContent.trim().length === 0) {
+                          throw new Error('HTML content is empty')
+                        }
+                        
+                        // Проверяем, что HTML начинается с <!DOCTYPE или <html
+                        if (!htmlContent.includes('<!DOCTYPE') && !htmlContent.includes('<html')) {
+                          throw new Error('Invalid HTML content: missing DOCTYPE or html tag')
+                        }
+                        
+                        // Убеждаемся, что HTML имеет закрывающий тег </html>
+                        if (!htmlContent.includes('</html>')) {
+                          htmlContent += '\n</html>'
+                        }
+                        
+                        // Убеждаемся, что есть тег <body>
+                        if (!htmlContent.includes('<body')) {
+                          const htmlTagIndex = htmlContent.indexOf('<html')
+                          if (htmlTagIndex !== -1) {
+                            const htmlTagEnd = htmlContent.indexOf('>', htmlTagIndex)
+                            if (htmlTagEnd !== -1) {
+                              htmlContent = htmlContent.substring(0, htmlTagEnd + 1) + '\n<body>\n' + 
+                                           htmlContent.substring(htmlTagEnd + 1)
+                              // Добавляем закрывающий тег </body> перед </html>
+                              const htmlEndIndex = htmlContent.lastIndexOf('</html>')
+                              if (htmlEndIndex !== -1) {
+                                htmlContent = htmlContent.substring(0, htmlEndIndex) + '\n</body>\n' + 
+                                             htmlContent.substring(htmlEndIndex)
+                              }
+                            }
+                          }
+                        }
+                        
+                        // Создаем blob из HTML контента
+                        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
+                        
+                        // Проверяем размер blob
+                        if (blob.size === 0) {
+                          throw new Error('Blob size is zero')
+                        }
+                        
+                        // Создаем blob URL
+                        const blobUrl = URL.createObjectURL(blob)
+                        
+                        // Проверяем, что blob URL создан успешно
+                        if (!blobUrl || blobUrl.length === 0) {
+                          throw new Error('Failed to create blob URL')
+                        }
+                        
+                        // Открываем в новой вкладке
+                        const newWindow = window.open(blobUrl, '_blank')
+                        
+                        if (!newWindow) {
+                          URL.revokeObjectURL(blobUrl)
+                          alert('Please allow popups to preview the page')
+                        } else {
+                          // Даем время окну загрузиться перед возможной очисткой
+                          // Blob URL будет автоматически очищен браузером при закрытии вкладки
+                          // Но мы можем сохранить ссылку на blobUrl в window для отладки
+                          if (typeof window !== 'undefined') {
+                            (window as any).lastBlobUrl = blobUrl
+                          }
+                        }
+                      } catch (error) {
+                        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+                        alert(`Failed to load page preview: ${errorMessage}`)
+                      } finally {
+                        // Восстанавливаем кнопку в случае ошибки
+                        const button = e.currentTarget
+                        if (button) {
+                          button.disabled = false
+                          const originalText = button.querySelector('span:last-child')?.textContent || 'Preview Page'
+                          button.innerHTML = `<span>👁️</span><span>${originalText}</span>`
+                        }
+                      }
+                    }}
+                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
+                  >
+                    <span>👁️</span>
+                    <span>Preview Page</span>
+                  </button>
                 )}
                 {selectedCreative.source_link && (
                   <a
@@ -875,6 +1618,717 @@ export default function HomePage() {
               </div>
             </div>
 
+            {/* Mobile Buttons - Below Header */}
+            <div className="flex flex-col sm:hidden gap-2 p-4 border-b border-gray-700">
+              {selectedCreative.download_url && (
+                <a
+                  href={selectedCreative.download_url}
+                  download
+                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                >
+                  <span>📥</span>
+                  <span>Download Archive</span>
+                </a>
+              )}
+              {selectedCreative.download_url && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    try {
+                      // Показываем индикатор загрузки (опционально)
+                      const button = e.currentTarget
+                      const originalText = button.innerHTML
+                      button.disabled = true
+                      button.innerHTML = '<span>⏳ Loading...</span>'
+                      
+                      // Загружаем файл в кеш браузера
+                      const response = await fetch(selectedCreative.download_url!)
+                      if (!response.ok) {
+                        throw new Error('Failed to load file')
+                      }
+                      
+                      // Получаем текст файла
+                      const text = await response.text()
+                      
+                      // Восстанавливаем кнопку
+                      button.disabled = false
+                      button.innerHTML = originalText
+                      
+                      // Проверяем, что мы получили контент
+                      if (!text || text.length === 0) {
+                        throw new Error('File content is empty')
+                      }
+                      
+                      // Проверяем, это MHTML или обычный HTML
+                      let htmlContent = text
+                      
+                      if (text.includes('Content-Type: multipart/related') || text.includes('boundary=')) {
+                        // Это MHTML, извлекаем HTML и CSS
+                        // Ищем boundary в заголовке MHTML
+                        let boundaryMatch = text.match(/boundary=["']?([^"'\s;]+)["']?/i)
+                        
+                        // Если не нашли в первой строке, ищем в Content-Type
+                        if (!boundaryMatch) {
+                          const contentTypeMatch = text.match(/Content-Type:\s*multipart\/related[^]*?boundary=["']?([^"'\s;]+)["']?/i)
+                          if (contentTypeMatch) {
+                            boundaryMatch = contentTypeMatch
+                          }
+                        }
+                        
+                        const cssResources = new Map()
+                        const imageResources = new Map()
+                        
+                        if (boundaryMatch) {
+                          const boundary = `--${boundaryMatch[1]}`
+                          // Разделяем на части, но пропускаем первую часть (заголовки MHTML)
+                          const allParts = text.split(boundary)
+                          // Пропускаем первую часть (заголовки MHTML) и последнюю (пустая строка после последнего boundary)
+                          const parts = allParts.slice(1, allParts.length - 1)
+                          
+                          // Собираем все ресурсы (CSS и изображения)
+                          for (const part of parts) {
+                            const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                              ? part.indexOf('\r\n\r\n') + 4
+                              : part.indexOf('\n\n') !== -1
+                              ? part.indexOf('\n\n') + 2
+                              : -1
+                            
+                            if (headerEnd === -1) continue
+                            
+                            const headers = part.substring(0, headerEnd).toLowerCase()
+                            const body = part.substring(headerEnd).trim()
+                            
+                            // Ищем CSS файлы
+                            if (headers.includes('content-type: text/css')) {
+                              const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
+                                                   headers.match(/content-id:\s*<([^>]+)>/i)
+                              const location = locationMatch ? locationMatch[1].trim() : null
+                              
+                              if (location && body.length > 0) {
+                                // Сохраняем CSS контент
+                                cssResources.set(location, body)
+                              }
+                            }
+                            
+                            // Ищем изображения (jpg, png, gif, webp, svg и т.д.)
+                            if (headers.includes('content-type: image/')) {
+                              const contentTypeMatch = headers.match(/content-type:\s*([^\r\n]+)/i)
+                              const contentType = contentTypeMatch ? contentTypeMatch[1].trim().toLowerCase() : 'image/jpeg'
+                              
+                              const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
+                                                   headers.match(/content-id:\s*<([^>]+)>/i)
+                              const location = locationMatch ? locationMatch[1].trim() : null
+                              
+                              if (location && body.length > 0) {
+                                try {
+                                  // Проверяем Content-Transfer-Encoding
+                                  const encodingMatch = headers.match(/content-transfer-encoding:\s*([^\r\n]+)/i)
+                                  const encoding = encodingMatch ? encodingMatch[1].trim().toLowerCase() : ''
+                                  
+                                  let imageData = body.trim()
+                                  
+                                  // Если изображение уже в формате data URI, используем как есть
+                                  if (imageData.startsWith('data:')) {
+                                    imageResources.set(location, imageData)
+                                    continue
+                                  }
+                                  
+                                  // Если encoding = base64 или изображение выглядит как base64
+                                  if (encoding === 'base64' || /^[A-Za-z0-9+/=\s]+$/.test(imageData)) {
+                                    // Удаляем все пробелы и переносы строк из base64
+                                    const cleanBody = imageData.replace(/[\r\n\s]/g, '')
+                                    imageData = `data:${contentType};base64,${cleanBody}`
+                                  } else {
+                                    // Для бинарных данных в браузере нужно использовать другой подход
+                                    // Но обычно в MHTML изображения уже в base64
+                                    // Пробуем использовать как base64
+                                    const cleanBody = imageData.replace(/[\r\n\s]/g, '')
+                                    if (/^[A-Za-z0-9+/=]+$/.test(cleanBody)) {
+                                      imageData = `data:${contentType};base64,${cleanBody}`
+                                    } else {
+                                      // Если не base64, пропускаем (в браузере сложно работать с бинарными данными)
+                                      continue
+                                    }
+                                  }
+                                  
+                                  // Сохраняем изображение
+                                  imageResources.set(location, imageData)
+                                } catch (e) {
+                                  // Если не удалось обработать изображение, пропускаем его
+                                  continue
+                                }
+                              }
+                            }
+                          }
+                          
+                          // Ищем часть с основным HTML контентом
+                          let foundMainHtml = false
+                          let mainHtmlContent = ''
+                          let maxHtmlLength = 0
+                          let baseUrl = '' // Базовый URL для разрешения относительных путей
+                          
+                          // Сначала ищем HTML с Content-Location (основная страница, не iframe)
+                          for (const part of parts) {
+                            const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                              ? part.indexOf('\r\n\r\n') + 4
+                              : part.indexOf('\n\n') !== -1
+                              ? part.indexOf('\n\n') + 2
+                              : -1
+                            
+                            if (headerEnd === -1) continue
+                            
+                            const headers = part.substring(0, headerEnd).toLowerCase()
+                            let body = part.substring(headerEnd).trim()
+                            
+                            // Удаляем возможные заголовки MHTML из начала body (если они там остались)
+                            // Ищем начало HTML контента - должно начинаться с <!DOCTYPE или <html
+                            const htmlStartIndex = Math.max(
+                              body.indexOf('<!DOCTYPE'),
+                              body.indexOf('<html')
+                            )
+                            
+                            if (htmlStartIndex > 0) {
+                              // Если HTML начинается не с начала body, обрезаем все заголовки перед ним
+                              body = body.substring(htmlStartIndex)
+                            }
+                            
+                            // Ищем HTML блок с Content-Location (основная страница, не iframe)
+                            // Исключаем iframe контент и другие встроенные элементы
+                            if (headers.includes('content-type: text/html') && 
+                                headers.includes('content-location:') &&
+                                (body.includes('<!DOCTYPE') || body.startsWith('<html'))) {
+                              const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i)
+                              const location = locationMatch ? locationMatch[1].trim() : ''
+                              
+                              // Сохраняем базовый URL
+                              if (location && !baseUrl) {
+                                try {
+                                  const urlObj = new URL(location)
+                                  baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1)}`
+                                } catch {
+                                  baseUrl = location.substring(0, location.lastIndexOf('/') + 1)
+                                }
+                              }
+                              
+                              // Пропускаем iframe, embed и другие встроенные элементы
+                              if (location.includes('iframe') || 
+                                  location.includes('embed') || 
+                                  location.includes('frame') ||
+                                  location.includes('widget') ||
+                                  location.includes('popup')) {
+                                continue
+                              }
+                              
+                              // Ищем начало HTML (может быть <!DOCTYPE или <html)
+                              const htmlStart = Math.max(
+                                body.indexOf('<!DOCTYPE'),
+                                body.indexOf('<html')
+                              )
+                              
+                              if (htmlStart !== -1) {
+                                const candidate = body.substring(htmlStart)
+                                const htmlEnd = candidate.indexOf('</html>')
+                                if (htmlEnd !== -1) {
+                                  const htmlBlock = candidate.substring(0, htmlEnd + 7)
+                                  // Берем самый большой HTML блок с Content-Location
+                                  if (htmlBlock.length > maxHtmlLength) {
+                                    mainHtmlContent = htmlBlock
+                                    maxHtmlLength = htmlBlock.length
+                                    foundMainHtml = true
+                                  }
+                                }
+                              }
+                            }
+                          }
+                          
+                          // Если нашли через Content-Location, используем его
+                          if (foundMainHtml && mainHtmlContent.length > 0) {
+                            htmlContent = mainHtmlContent
+                          } else {
+                            // Если не нашли через Content-Location, берем самый большой HTML блок
+                            maxHtmlLength = 0
+                            for (const part of parts) {
+                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                ? part.indexOf('\r\n\r\n') + 4
+                                : part.indexOf('\n\n') !== -1
+                                ? part.indexOf('\n\n') + 2
+                                : -1
+                              
+                              if (headerEnd === -1) continue
+                              
+                              const headers = part.substring(0, headerEnd).toLowerCase()
+                              let body = part.substring(headerEnd).trim()
+                              
+                              // Удаляем возможные заголовки MHTML из начала body
+                              const htmlStartIndex = Math.max(
+                                body.indexOf('<!DOCTYPE'),
+                                body.indexOf('<html')
+                              )
+                              
+                              if (htmlStartIndex > 0) {
+                                // Если HTML начинается не с начала body, обрезаем все заголовки перед ним
+                                body = body.substring(htmlStartIndex)
+                              }
+                              
+                              // Пропускаем части без HTML или с подозрительными заголовками
+                              if (!headers.includes('content-type: text/html') || 
+                                  (!body.includes('<!DOCTYPE') && !body.startsWith('<html'))) {
+                                continue
+                              }
+                              
+                              // Пропускаем iframe и встроенный контент
+                              if (headers.includes('content-location:')) {
+                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i)
+                                const location = locationMatch ? locationMatch[1].trim().toLowerCase() : ''
+                                if (location.includes('iframe') || 
+                                    location.includes('embed') || 
+                                    location.includes('frame') ||
+                                    location.includes('widget') ||
+                                    location.includes('popup')) {
+                                  continue
+                                }
+                              }
+                              
+                              // Ищем начало HTML (может быть <!DOCTYPE или <html)
+                              const htmlStart = Math.max(
+                                body.indexOf('<!DOCTYPE'),
+                                body.indexOf('<html')
+                              )
+                              
+                              if (htmlStart !== -1) {
+                                const candidate = body.substring(htmlStart)
+                                const htmlEnd = candidate.indexOf('</html>')
+                                if (htmlEnd !== -1) {
+                                  const htmlBlock = candidate.substring(0, htmlEnd + 7)
+                                  // Берем самый большой HTML блок (основной контент)
+                                  if (htmlBlock.length > maxHtmlLength && htmlBlock.length > 1000) {
+                                    mainHtmlContent = htmlBlock
+                                    maxHtmlLength = htmlBlock.length
+                                  }
+                                }
+                              }
+                            }
+                            
+                            if (mainHtmlContent.length > 0) {
+                              htmlContent = mainHtmlContent
+                            }
+                          }
+                          
+                          // Встраиваем CSS стили в HTML
+                          if (htmlContent && cssResources.size > 0) {
+                            // Находим </head> или создаем head если его нет
+                            let headEnd = htmlContent.indexOf('</head>')
+                            if (headEnd === -1) {
+                              // Если нет </head>, добавляем перед </html>
+                              const htmlEnd = htmlContent.indexOf('</html>')
+                              if (htmlEnd !== -1) {
+                                htmlContent = htmlContent.substring(0, htmlEnd) + '</head></html>'
+                                headEnd = htmlContent.indexOf('</head>')
+                              }
+                            }
+                            
+                            if (headEnd !== -1) {
+                              // Создаем блок со стилями
+                              let stylesBlock = ''
+                              cssResources.forEach((cssContent, location) => {
+                                stylesBlock += `<style data-source="${location}">\n${cssContent}\n</style>\n`
+                              })
+                              
+                              // Вставляем стили перед </head>
+                              htmlContent = htmlContent.substring(0, headEnd) + stylesBlock + htmlContent.substring(headEnd)
+                            }
+                            
+                            // Заменяем ссылки на cid: CSS файлы на встроенные стили
+                            cssResources.forEach((cssContent, location) => {
+                              // Заменяем cid: ссылки в href
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`<link[^>]*href=["']cid:${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`, 'gi'),
+                                ''
+                              )
+                            })
+                          }
+                          
+                          // Функция для разрешения относительных URL
+                          const resolveUrl = (url: string, base: string): string => {
+                            if (!url) return url
+                            
+                            // Если уже абсолютный URL
+                            if (url.startsWith('http://') || url.startsWith('https://')) {
+                              return url
+                            }
+                            
+                            // Если протокол-относительный URL (//example.com/image.jpg)
+                            if (url.startsWith('//')) {
+                              try {
+                                const baseUrl = new URL(base || 'http://example.com')
+                                return `${baseUrl.protocol}${url}`
+                              } catch {
+                                return `https:${url}`
+                              }
+                            }
+                            
+                            // Если абсолютный путь (/image.jpg)
+                            if (url.startsWith('/')) {
+                              try {
+                                const baseUrl = new URL(base || 'http://example.com')
+                                return `${baseUrl.protocol}//${baseUrl.host}${url}`
+                              } catch {
+                                return url
+                              }
+                            }
+                            
+                            // Относительный путь (image.jpg или ../image.jpg)
+                            try {
+                              const baseUrl = new URL(base || 'http://example.com')
+                              return new URL(url, baseUrl).toString()
+                            } catch {
+                              return url
+                            }
+                          }
+                          
+                          // Функция для нормализации URL (для сравнения)
+                          const normalizeUrlForMatch = (url: string): string => {
+                            if (!url) return ''
+                            try {
+                              const urlObj = new URL(url, baseUrl || 'http://example.com')
+                              // Убираем протокол, домен, query и hash для сравнения
+                              return urlObj.pathname.toLowerCase()
+                            } catch {
+                              // Если не URL, возвращаем путь без query и hash
+                              return url.split('?')[0].split('#')[0].toLowerCase()
+                            }
+                          }
+                          
+                          // Заменяем ссылки на изображения из MHTML на встроенные data URIs
+                          if (htmlContent && imageResources.size > 0) {
+                            // Создаем карту нормализованных путей для быстрого поиска
+                            const imageMap = new Map<string, string>()
+                            imageResources.forEach((imageData, location) => {
+                              // Сохраняем оригинальный путь (в разных вариантах регистра)
+                              imageMap.set(location.toLowerCase(), imageData)
+                              imageMap.set(location, imageData)
+                              
+                              // Сохраняем нормализованный путь
+                              const normalized = normalizeUrlForMatch(location)
+                              if (normalized) {
+                                imageMap.set(normalized, imageData)
+                                // Также сохраняем с ведущим слешем
+                                if (!normalized.startsWith('/')) {
+                                  imageMap.set(`/${normalized}`, imageData)
+                                }
+                              }
+                              
+                              // Сохраняем только имя файла
+                              const fileName = location.split('/').pop()?.split('?')[0]?.toLowerCase()
+                              if (fileName && fileName.includes('.')) {
+                                imageMap.set(fileName, imageData)
+                                // Также с разными вариантами пути
+                                imageMap.set(`./${fileName}`, imageData)
+                                imageMap.set(`../${fileName}`, imageData)
+                              }
+                              
+                              // Если есть baseUrl, разрешаем относительные пути
+                              if (baseUrl) {
+                                try {
+                                  const resolved = resolveUrl(location, baseUrl)
+                                  if (resolved !== location) {
+                                    imageMap.set(resolved.toLowerCase(), imageData)
+                                    const resolvedNormalized = normalizeUrlForMatch(resolved)
+                                    if (resolvedNormalized) {
+                                      imageMap.set(resolvedNormalized, imageData)
+                                    }
+                                  }
+                                } catch (e) {
+                                  // Игнорируем ошибки разрешения URL
+                                }
+                              }
+                            })
+                            
+                            // Заменяем все ссылки на изображения
+                            imageMap.forEach((imageData, searchKey) => {
+                              // Экранируем для regex
+                              const escaped = searchKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                              
+                              // Заменяем в src атрибутах
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(src=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  // Проверяем, что это действительно изображение
+                                  if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                      url.includes('image') || 
+                                      url.match(/data:image/i)) {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                  return match
+                                }
+                              )
+                              
+                              // Заменяем в srcset
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(srcset=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  // Проверяем, что это действительно изображение
+                                  if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                      url.includes('image')) {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                  return match
+                                }
+                              )
+                              
+                              // Заменяем в data-src (lazy loading)
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(data-src=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  // Проверяем, что это действительно изображение
+                                  if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                      url.includes('image')) {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                  return match
+                                }
+                              )
+                              
+                              // Заменяем cid: ссылки
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`cid:${escaped}`, 'gi'),
+                                imageData
+                              )
+                              
+                              // Заменяем в inline стилях (style="background-image: url(...)")
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(style=["'][^"']*background-image:\\s*url\\(["']?)([^"')]*${escaped}[^"')]*)(["']?\\)[^"']*["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  return `${prefix}${imageData}${suffix}`
+                                }
+                              )
+                              
+                              // Также заменяем в других CSS свойствах со ссылками на изображения
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(style=["'][^"']*:\\s*url\\(["']?)([^"')]*${escaped}[^"')]*)(["']?\\)[^"']*["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  // Проверяем, что это изображение
+                                  if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                      url.includes('image')) {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                  return match
+                                }
+                              )
+                            })
+                            
+                            // Также обрабатываем пути в CSS
+                            const updatedCssResources = new Map<string, string>()
+                            cssResources.forEach((cssContent, cssLocation) => {
+                              let updatedCss = cssContent
+                              
+                              // Обрабатываем все возможные варианты путей к изображениям
+                              imageMap.forEach((imageData, searchKey) => {
+                                const escaped = searchKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                
+                                // Заменяем в CSS url() с разными вариантами кавычек и без них
+                                updatedCss = updatedCss.replace(
+                                  new RegExp(`url\\(["']?[^"')]*${escaped}[^"')]*["']?\\)`, 'gi'),
+                                  `url(${imageData})`
+                                )
+                                
+                                // Также заменяем относительные пути, разрешая их через baseUrl
+                                if (baseUrl) {
+                                  const resolvedUrl = resolveUrl(searchKey, baseUrl)
+                                  if (resolvedUrl !== searchKey) {
+                                    const resolvedEscaped = resolvedUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                    updatedCss = updatedCss.replace(
+                                      new RegExp(`url\\(["']?[^"')]*${resolvedEscaped}[^"')]*["']?\\)`, 'gi'),
+                                      `url(${imageData})`
+                                    )
+                                  }
+                                }
+                              })
+                              
+                              updatedCssResources.set(cssLocation, updatedCss)
+                            })
+                            
+                            // Обновляем CSS ресурсы
+                            cssResources.clear()
+                            updatedCssResources.forEach((content, location) => {
+                              cssResources.set(location, content)
+                            })
+                            
+                            // Обновляем CSS в HTML после замены изображений
+                            if (cssResources.size > 0) {
+                              let headEnd = htmlContent.indexOf('</head>')
+                              if (headEnd !== -1) {
+                                // Находим существующие style теги и обновляем их
+                                const styleRegex = /<style[^>]*data-source=["']([^"']+)["'][^>]*>([\s\S]*?)<\/style>/gi
+                                htmlContent = htmlContent.replace(styleRegex, (match, source, content) => {
+                                  const updatedContent = cssResources.get(source) || content
+                                  return `<style data-source="${source}">\n${updatedContent}\n</style>`
+                                })
+                              }
+                            }
+                          }
+                        } else {
+                          // Fallback: прямой поиск HTML
+                          const htmlMatch = text.match(/<!DOCTYPE[\s\S]*?<\/html>/i)
+                          if (htmlMatch) {
+                            htmlContent = htmlMatch[0]
+                          }
+                        }
+                        
+                        // Проверяем, что HTML контент был найден
+                        if (!htmlContent || htmlContent.trim().length === 0) {
+                          throw new Error('Failed to extract HTML content from MHTML file')
+                        }
+                        
+                        // Финальная обрезка - строго по первому </html>
+                        const finalHtmlEnd = htmlContent.indexOf('</html>')
+                        if (finalHtmlEnd !== -1) {
+                          htmlContent = htmlContent.substring(0, finalHtmlEnd + 7)
+                        }
+                      }
+                      
+                      // Финальная очистка HTML контента
+                      htmlContent = htmlContent.trim()
+                      
+                      // Проверяем, что после очистки контент не пустой
+                      if (!htmlContent || htmlContent.length === 0) {
+                        throw new Error('HTML content is empty after processing')
+                      }
+                      
+                      // Удаляем заголовки MHTML, если они попали в начало HTML (From, Subject, Date и т.д.)
+                      const mhtmlHeadersPattern = /^(From:|Snapshot-Content-Location:|Subject:|Date:|MIME-Version:|Content-Type:|boundary=)[^\n]*\n?/gmi
+                      htmlContent = htmlContent.replace(mhtmlHeadersPattern, '')
+                      
+                      // Ищем начало HTML контента после удаления заголовков
+                      const finalHtmlStart = Math.max(
+                        htmlContent.indexOf('<!DOCTYPE'),
+                        htmlContent.indexOf('<html')
+                      )
+                      
+                      if (finalHtmlStart > 0) {
+                        // Если HTML начинается не с начала, обрезаем все перед ним
+                        htmlContent = htmlContent.substring(finalHtmlStart)
+                      }
+                      
+                      // Строго обрезаем по первому </html> - это гарантирует, что мы не захватим
+                      // дополнительные HTML блоки из других частей MHTML (например, iframe контент)
+                      const strictHtmlEnd = htmlContent.indexOf('</html>')
+                      if (strictHtmlEnd !== -1) {
+                        htmlContent = htmlContent.substring(0, strictHtmlEnd + 7)
+                      }
+                      
+                      // Удаляем все скрипты, которые могут добавлять элементы на страницу
+                      htmlContent = htmlContent.replace(/<script[\s\S]*?<\/script>/gi, '')
+                      
+                      // Проверяем структуру HTML - должно быть: <!DOCTYPE>...<html>...<body>...</body></html>
+                      // Убеждаемся, что после </body> идет только </html>, без лишнего контента
+                      const bodyEndIndex = htmlContent.lastIndexOf('</body>')
+                      const htmlEndIndex = htmlContent.lastIndexOf('</html>')
+                      
+                      if (bodyEndIndex !== -1 && htmlEndIndex !== -1 && htmlEndIndex > bodyEndIndex) {
+                        // Проверяем, что между </body> и </html> нет лишнего контента
+                        const betweenTags = htmlContent.substring(bodyEndIndex + 7, htmlEndIndex).trim()
+                        if (betweenTags.length > 0 && !betweenTags.match(/^[\s\n\r]*$/)) {
+                          // Есть лишний контент между тегами, удаляем его
+                          htmlContent = htmlContent.substring(0, bodyEndIndex + 7) + '\n</html>'
+                        }
+                      }
+                      
+                      // Валидация HTML контента перед созданием blob
+                      if (!htmlContent || htmlContent.trim().length === 0) {
+                        throw new Error('HTML content is empty')
+                      }
+                      
+                      // Проверяем, что HTML начинается с <!DOCTYPE или <html
+                      if (!htmlContent.includes('<!DOCTYPE') && !htmlContent.includes('<html')) {
+                        throw new Error('Invalid HTML content: missing DOCTYPE or html tag')
+                      }
+                      
+                      // Убеждаемся, что HTML имеет закрывающий тег </html>
+                      if (!htmlContent.includes('</html>')) {
+                        htmlContent += '\n</html>'
+                      }
+                      
+                      // Убеждаемся, что есть тег <body>
+                      if (!htmlContent.includes('<body')) {
+                        const htmlTagIndex = htmlContent.indexOf('<html')
+                        if (htmlTagIndex !== -1) {
+                          const htmlTagEnd = htmlContent.indexOf('>', htmlTagIndex)
+                          if (htmlTagEnd !== -1) {
+                            htmlContent = htmlContent.substring(0, htmlTagEnd + 1) + '\n<body>\n' + 
+                                         htmlContent.substring(htmlTagEnd + 1)
+                            // Добавляем закрывающий тег </body> перед </html>
+                            const htmlEndIndex = htmlContent.lastIndexOf('</html>')
+                            if (htmlEndIndex !== -1) {
+                              htmlContent = htmlContent.substring(0, htmlEndIndex) + '\n</body>\n' + 
+                                           htmlContent.substring(htmlEndIndex)
+                            }
+                          }
+                        }
+                      }
+                      
+                      // Создаем blob из HTML контента
+                      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
+                      
+                      // Проверяем размер blob
+                      if (blob.size === 0) {
+                        throw new Error('Blob size is zero')
+                      }
+                      
+                      // Создаем blob URL
+                      const blobUrl = URL.createObjectURL(blob)
+                      
+                      // Проверяем, что blob URL создан успешно
+                      if (!blobUrl || blobUrl.length === 0) {
+                        throw new Error('Failed to create blob URL')
+                      }
+                      
+                      // Открываем в новой вкладке
+                      const newWindow = window.open(blobUrl, '_blank')
+                      
+                      if (!newWindow) {
+                        URL.revokeObjectURL(blobUrl)
+                        alert('Please allow popups to preview the page')
+                      } else {
+                        // Даем время окну загрузиться перед возможной очисткой
+                        // Blob URL будет автоматически очищен браузером при закрытии вкладки
+                        // Но мы можем сохранить ссылку на blobUrl в window для отладки
+                        if (typeof window !== 'undefined') {
+                          (window as any).lastBlobUrl = blobUrl
+                        }
+                      }
+                    } catch (error) {
+                      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+                      alert(`Failed to load page preview: ${errorMessage}`)
+                    } finally {
+                      // Восстанавливаем кнопку в случае ошибки
+                      const button = e.currentTarget
+                      if (button) {
+                        button.disabled = false
+                        const originalText = button.querySelector('span:last-child')?.textContent || 'Preview Page'
+                        button.innerHTML = `<span>👁️</span><span>${originalText}</span>`
+                      }
+                    }
+                  }}
+                  className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
+                >
+                  <span>👁️</span>
+                  <span>Preview Page</span>
+                </button>
+              )}
+              {selectedCreative.source_link && (
+                <a
+                  href={selectedCreative.source_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                >
+                  <span>🔗</span>
+                  <span>Link</span>
+                </a>
+              )}
+            </div>
+
             {/* Modal Content */}
             <div className="p-6">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -884,8 +2338,19 @@ export default function HomePage() {
                   
                   {/* Title */}
                   <div className="mb-4 pb-4 border-b border-gray-700">
-                    <div className="text-sm text-gray-400 mb-1">Title</div>
-                    <div className="text-base text-white font-medium">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-sm text-gray-400">Title</div>
+                      {selectedCreative.title && (
+                        <button
+                          onClick={() => copyToClipboard(selectedCreative.title!, 'title')}
+                          className="p-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors flex items-center justify-center"
+                          title="Копировать заголовок"
+                        >
+                          {copiedField === 'title' ? <CheckIcon /> : <CopyIcon />}
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-base text-white font-medium break-words">
                       {selectedCreative.title || '-'}
                     </div>
                   </div>
@@ -893,8 +2358,17 @@ export default function HomePage() {
                   {/* Description */}
                   {selectedCreative.description && (
                     <div className="mb-4 pb-4 border-b border-gray-700">
-                      <div className="text-sm text-gray-400 mb-1">Description</div>
-                      <div className="text-base text-gray-300">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-sm text-gray-400">Description</div>
+                        <button
+                          onClick={() => copyToClipboard(selectedCreative.description!, 'description')}
+                          className="p-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors flex items-center justify-center"
+                          title="Копировать описание"
+                        >
+                          {copiedField === 'description' ? <CheckIcon /> : <CopyIcon />}
+                        </button>
+                      </div>
+                      <div className="text-base text-gray-300 break-words">
                         {selectedCreative.description}
                       </div>
                     </div>
@@ -964,8 +2438,9 @@ export default function HomePage() {
                             e.stopPropagation()
                             filterByCountry(selectedCreative.country_code!)
                           }}
-                          className="text-sm text-white underline font-medium hover:opacity-80 transition-opacity"
+                          className="text-sm text-white underline font-medium hover:opacity-80 transition-opacity flex items-center gap-1.5"
                         >
+                          <CountryFlag countryCode={selectedCreative.country_code || selectedCreative.countries?.code} />
                           {selectedCreative.countries?.name || '-'}
                         </button>
                       ) : (
@@ -1073,226 +2548,6 @@ export default function HomePage() {
                       Здесь может быть твоя реклама
                     </div>
                   )}
-                </div>
-              )}
-
-              {/* Page Preview Button - Bottom */}
-              {selectedCreative.download_url && (
-                <div className="mt-6 w-full border-t border-gray-700 pt-4">
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation()
-                      try {
-                        // Загружаем файл в кеш браузера
-                        const response = await fetch(selectedCreative.download_url!)
-                        if (!response.ok) {
-                          throw new Error('Failed to load file')
-                        }
-                        
-                        // Получаем текст файла
-                        const text = await response.text()
-                        
-                        // Проверяем, это MHTML или обычный HTML
-                        let htmlContent = text
-                        
-                        if (text.includes('Content-Type: multipart/related') || text.includes('boundary=')) {
-                          // Это MHTML, извлекаем HTML и CSS
-                          const boundaryMatch = text.match(/boundary=["']?([^"'\s;]+)["']?/i)
-                          const cssResources = new Map()
-                          
-                          if (boundaryMatch) {
-                            const boundary = `--${boundaryMatch[1]}`
-                            const parts = text.split(boundary)
-                            
-                            // Сначала собираем все CSS ресурсы
-                            for (const part of parts) {
-                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
-                                ? part.indexOf('\r\n\r\n') + 4
-                                : part.indexOf('\n\n') !== -1
-                                ? part.indexOf('\n\n') + 2
-                                : -1
-                              
-                              if (headerEnd === -1) continue
-                              
-                              const headers = part.substring(0, headerEnd).toLowerCase()
-                              const body = part.substring(headerEnd).trim()
-                              
-                              // Ищем CSS файлы
-                              if (headers.includes('content-type: text/css')) {
-                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
-                                                     headers.match(/content-id:\s*<([^>]+)>/i)
-                                const location = locationMatch ? locationMatch[1].trim() : null
-                                
-                                if (location && body.length > 0) {
-                                  // Сохраняем CSS контент
-                                  cssResources.set(location, body)
-                                }
-                              }
-                            }
-                            
-                            // Ищем часть с основным HTML контентом
-                            let foundMainHtml = false
-                            for (const part of parts) {
-                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
-                                ? part.indexOf('\r\n\r\n') + 4
-                                : part.indexOf('\n\n') !== -1
-                                ? part.indexOf('\n\n') + 2
-                                : -1
-                              
-                              if (headerEnd === -1) continue
-                              
-                              const headers = part.substring(0, headerEnd).toLowerCase()
-                              const body = part.substring(headerEnd).trim()
-                              
-                              // Ищем HTML блок с Content-Location (основная страница, не iframe)
-                              if (headers.includes('content-type: text/html') && 
-                                  headers.includes('content-location:') &&
-                                  body.includes('<!DOCTYPE')) {
-                                const htmlStart = body.indexOf('<!DOCTYPE')
-                                if (htmlStart !== -1) {
-                                  htmlContent = body.substring(htmlStart)
-                                  // Обрезаем строго по первому </html>
-                                  const htmlEnd = htmlContent.indexOf('</html>')
-                                  if (htmlEnd !== -1) {
-                                    htmlContent = htmlContent.substring(0, htmlEnd + 7)
-                                    foundMainHtml = true
-                                    break
-                                  }
-                                }
-                              }
-                            }
-                            
-                            // Если не нашли через Content-Location, берем первый большой HTML блок
-                            if (!foundMainHtml) {
-                              for (const part of parts) {
-                                const headerEnd = part.indexOf('\r\n\r\n') !== -1 
-                                  ? part.indexOf('\r\n\r\n') + 4
-                                  : part.indexOf('\n\n') !== -1
-                                  ? part.indexOf('\n\n') + 2
-                                  : -1
-                                
-                                if (headerEnd === -1) continue
-                                
-                                const headers = part.substring(0, headerEnd).toLowerCase()
-                                const body = part.substring(headerEnd).trim()
-                                
-                                if (headers.includes('content-type: text/html') && body.includes('<!DOCTYPE')) {
-                                  const htmlStart = body.indexOf('<!DOCTYPE')
-                                  if (htmlStart !== -1) {
-                                    const candidate = body.substring(htmlStart)
-                                    // Берем самый большой HTML блок (основной контент)
-                                    if (!foundMainHtml || candidate.length > htmlContent.length) {
-                                      htmlContent = candidate
-                                      const htmlEnd = htmlContent.indexOf('</html>')
-                                      if (htmlEnd !== -1) {
-                                        htmlContent = htmlContent.substring(0, htmlEnd + 7)
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                            
-                            // Встраиваем CSS стили в HTML
-                            if (htmlContent && cssResources.size > 0) {
-                              // Находим </head> или создаем head если его нет
-                              let headEnd = htmlContent.indexOf('</head>')
-                              if (headEnd === -1) {
-                                // Если нет </head>, добавляем перед </html>
-                                const htmlEnd = htmlContent.indexOf('</html>')
-                                if (htmlEnd !== -1) {
-                                  htmlContent = htmlContent.substring(0, htmlEnd) + '</head></html>'
-                                  headEnd = htmlContent.indexOf('</head>')
-                                }
-                              }
-                              
-                              if (headEnd !== -1) {
-                                // Создаем блок со стилями
-                                let stylesBlock = ''
-                                cssResources.forEach((cssContent, location) => {
-                                  stylesBlock += `<style data-source="${location}">\n${cssContent}\n</style>\n`
-                                })
-                                
-                                // Вставляем стили перед </head>
-                                htmlContent = htmlContent.substring(0, headEnd) + stylesBlock + htmlContent.substring(headEnd)
-                              }
-                              
-                              // Заменяем ссылки на cid: CSS файлы на встроенные стили
-                              cssResources.forEach((cssContent, location) => {
-                                // Заменяем cid: ссылки в href
-                                htmlContent = htmlContent.replace(
-                                  new RegExp(`<link[^>]*href=["']cid:${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`, 'gi'),
-                                  ''
-                                )
-                              })
-                            }
-                          } else {
-                            // Fallback: прямой поиск HTML
-                            const htmlMatch = text.match(/<!DOCTYPE[\s\S]*?<\/html>/i)
-                            if (htmlMatch) {
-                              htmlContent = htmlMatch[0]
-                            }
-                          }
-                          
-                          // Финальная обрезка - строго по первому </html>
-                          const finalHtmlEnd = htmlContent.indexOf('</html>')
-                          if (finalHtmlEnd !== -1) {
-                            htmlContent = htmlContent.substring(0, finalHtmlEnd + 7)
-                          }
-                        }
-                        
-                        // Финальная очистка HTML контента
-                        htmlContent = htmlContent.trim()
-                        
-                        // Строго обрезаем по первому </html> - это гарантирует, что мы не захватим
-                        // дополнительные HTML блоки из других частей MHTML (например, iframe контент)
-                        const strictHtmlEnd = htmlContent.indexOf('</html>')
-                        if (strictHtmlEnd !== -1) {
-                          htmlContent = htmlContent.substring(0, strictHtmlEnd + 7)
-                        }
-                        
-                        // Удаляем все скрипты, которые могут добавлять элементы на страницу
-                        htmlContent = htmlContent.replace(/<script[\s\S]*?<\/script>/gi, '')
-                        
-                        // Проверяем структуру HTML - должно быть: <!DOCTYPE>...<html>...<body>...</body></html>
-                        // Убеждаемся, что после </body> идет только </html>, без лишнего контента
-                        const bodyEndIndex = htmlContent.lastIndexOf('</body>')
-                        const htmlEndIndex = htmlContent.lastIndexOf('</html>')
-                        
-                        if (bodyEndIndex !== -1 && htmlEndIndex !== -1 && htmlEndIndex > bodyEndIndex) {
-                          // Проверяем, что между </body> и </html> нет лишнего контента
-                          const betweenTags = htmlContent.substring(bodyEndIndex + 7, htmlEndIndex).trim()
-                          if (betweenTags.length > 0 && !betweenTags.match(/^[\s\n\r]*$/)) {
-                            // Есть лишний контент между тегами, удаляем его
-                            htmlContent = htmlContent.substring(0, bodyEndIndex + 7) + '\n</html>'
-                          }
-                        }
-                        
-                        // Создаем blob из HTML контента
-                        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
-                        
-                        // Создаем blob URL
-                        const blobUrl = URL.createObjectURL(blob)
-                        
-                        // Открываем в новой вкладке
-                        const newWindow = window.open(blobUrl, '_blank')
-                        
-                        if (!newWindow) {
-                          URL.revokeObjectURL(blobUrl)
-                          alert('Please allow popups to preview the page')
-                        }
-                        
-                        // Blob URL будет автоматически очищен браузером при закрытии вкладки
-                      } catch (error) {
-                        console.error('Error loading page:', error)
-                        alert('Failed to load page preview')
-                      }
-                    }}
-                    className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition-colors"
-                  >
-                    <span>👁️</span>
-                    <span>Preview Page</span>
-                  </button>
                 </div>
               )}
             </div>
