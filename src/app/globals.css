@@ -17,7 +17,11 @@
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'kern' 1;
 }
 
 /* Простая инверсия цветов для светлой темы */
@@ -30,6 +34,12 @@ html.light-theme video,
 html.light-theme iframe,
 html.light-theme [style*="background-image"] {
   filter: invert(1) hue-rotate(180deg);
+}
+
+/* Кнопки с белым фоном исключены из инверсии темы */
+html.light-theme .no-theme-invert,
+html.light-theme .no-theme-invert img {
+  filter: none !important;
 }
 
 @layer utilities {
@@ -64,4 +74,150 @@ html.light-theme [style*="background-image"] {
 .card-hover:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+/* Блокировка выделения текста и изображений */
+.no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.no-select img {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
+  user-drag: none;
+  pointer-events: none;
+}
+
+/* Modern Button System */
+@layer components {
+  /* Base button styles */
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-medium;
+    @apply transition-all duration-200 ease-out;
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none;
+    @apply active:scale-[0.98];
+    letter-spacing: 0.01em;
+    font-weight: 500;
+  }
+
+  /* Primary button - main actions */
+  .btn-primary {
+    @apply bg-blue-600 text-white;
+    @apply hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/20;
+    @apply focus:ring-blue-500;
+    @apply hover:scale-[1.02];
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
+  }
+
+  /* Secondary button - secondary actions */
+  .btn-secondary {
+    @apply bg-gray-800 text-white border border-gray-700;
+    @apply hover:bg-gray-700 hover:border-gray-600;
+    @apply hover:shadow-lg hover:shadow-black/20;
+    @apply focus:ring-gray-500;
+    @apply hover:scale-[1.02];
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Danger button - destructive actions */
+  .btn-danger {
+    @apply bg-red-600 text-white;
+    @apply hover:bg-red-700 hover:shadow-lg hover:shadow-red-500/20;
+    @apply focus:ring-red-500;
+    @apply hover:scale-[1.02];
+    box-shadow: 0 2px 8px rgba(220, 38, 38, 0.15);
+  }
+
+  /* Ghost button - minimal style for headers */
+  .btn-ghost {
+    @apply bg-transparent text-gray-300 border border-transparent;
+    @apply hover:bg-gray-800/50 hover:text-white;
+    @apply focus:ring-gray-500;
+    @apply hover:scale-[1.02];
+  }
+
+  /* Success button - for positive actions like Preview */
+  .btn-success {
+    @apply bg-green-600 text-white;
+    @apply hover:bg-green-700 hover:shadow-lg hover:shadow-green-500/20;
+    @apply focus:ring-green-500;
+    @apply hover:scale-[1.02];
+    box-shadow: 0 2px 8px rgba(22, 163, 74, 0.15);
+  }
+
+  /* Small button variant */
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs rounded-md;
+  }
+
+  /* Large button variant */
+  .btn-lg {
+    @apply px-6 py-3 text-base rounded-xl;
+  }
+
+  /* Full width button */
+  .btn-full {
+    @apply w-full;
+  }
+}
+
+/* Typography improvements */
+h1, h2, h3, h4, h5, h6 {
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+/* Modal animations */
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes modalFadeOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+@keyframes backdropFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal-backdrop {
+  animation: backdropFadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal-content {
+  animation: modalFadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal-content.closing {
+  animation: modalFadeOut 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }

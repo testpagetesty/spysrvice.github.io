@@ -128,10 +128,116 @@ export default function AdminPage() {
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
   
   // Tab states
-  const [activeTab, setActiveTab] = useState<'list' | 'create' | 'ads'>('list')
+  const [activeTab, setActiveTab] = useState<'list' | 'create' | 'ads' | 'dashboard'>('list')
   
   // Ads settings states
   const [adsSettings, setAdsSettings] = useState<any[]>([])
+
+  // Dashboard settings states
+  const [dashboardFilterSettings, setDashboardFilterSettings] = useState({
+    date: true,
+    format: true,
+    type: true,
+    placement: true,
+    country: true,
+    platform: true,
+    cloaking: true
+  })
+
+  // Загружаем настройки фильтров при открытии таба
+  useEffect(() => {
+    if (activeTab === 'dashboard') {
+      loadDashboardSettings()
+    }
+  }, [activeTab])
+
+  const loadDashboardSettings = async () => {
+    try {
+      const response = await fetch('/api/dashboard-settings')
+      if (!response.ok) {
+        throw new Error('Failed to load settings')
+      }
+      const data = await response.json()
+      
+      if (data.settings?.filters) {
+        setDashboardFilterSettings({
+          date: data.settings.filters.date !== false,
+          format: data.settings.filters.format !== false,
+          type: data.settings.filters.type !== false,
+          placement: data.settings.filters.placement !== false,
+          country: data.settings.filters.country !== false,
+          platform: data.settings.filters.platform !== false,
+          cloaking: data.settings.filters.cloaking !== false
+        })
+      }
+    } catch (e) {
+      console.error('Error loading dashboard settings:', e)
+      // Fallback на localStorage если API недоступен
+      const settings = localStorage.getItem('dashboardSettings')
+      if (settings) {
+        try {
+          const parsed = JSON.parse(settings)
+          if (parsed.filters) {
+            setDashboardFilterSettings({
+              date: parsed.filters.date !== false,
+              format: parsed.filters.format !== false,
+              type: parsed.filters.type !== false,
+              placement: parsed.filters.placement !== false,
+              country: parsed.filters.country !== false,
+              platform: parsed.filters.platform !== false,
+              cloaking: parsed.filters.cloaking !== false
+            })
+          }
+        } catch (err) {
+          console.error('Error parsing localStorage settings:', err)
+        }
+      }
+    }
+  }
+
+  const saveDashboardFilterSettings = async (filterKey: string, value: boolean) => {
+    try {
+      // Обновляем локальное состояние сразу для мгновенного отклика UI
+      const updatedFilters = {
+        ...dashboardFilterSettings,
+        [filterKey]: value
+      }
+      setDashboardFilterSettings(updatedFilters)
+      
+      // Сохраняем через API
+      const saveResponse = await fetch('/api/dashboard-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          key: 'filters',
+          value: updatedFilters
+        })
+      })
+      
+      if (!saveResponse.ok) {
+        throw new Error('Failed to save settings')
+      }
+      
+      // Также сохраняем в localStorage как fallback
+      const settings = JSON.parse(localStorage.getItem('dashboardSettings') || '{}')
+      settings.filters = updatedFilters
+      localStorage.setItem('dashboardSettings', JSON.stringify(settings))
+      
+      // Отправляем событие для обновления главной страницы
+      window.dispatchEvent(new Event('dashboardSettingsChanged'))
+      
+    } catch (e) {
+      console.error('Error saving dashboard settings:', e)
+      // Fallback на localStorage
+      const settings = JSON.parse(localStorage.getItem('dashboardSettings') || '{}')
+      settings.filters = settings.filters || {}
+      settings.filters[filterKey] = value
+      localStorage.setItem('dashboardSettings', JSON.stringify(settings))
+      window.dispatchEvent(new Event('dashboardSettingsChanged'))
+    }
+  }
   const [editingAd, setEditingAd] = useState<any | null>(null)
   const [adForm, setAdForm] = useState({
     position: 'modal',
@@ -175,6 +281,8 @@ export default function AdminPage() {
   const [showFullScreenshot, setShowFullScreenshot] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingCreative, setEditingCreative] = useState<Creative | null>(null)
+  const [editingField, setEditingField] = useState<string | null>(null)
+  const [fieldEditValue, setFieldEditValue] = useState<string>('')
   const [editForm, setEditForm] = useState({
     title: '',
     description: '',
@@ -248,6 +356,20 @@ export default function AdminPage() {
     }
   }, [isAuthenticated])
 
+  // Блокируем скролл страницы когда открыта модалка
+  useEffect(() => {
+    if (showModal || showFullScreenshot || showEditModal || showDeleteConfirm) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    
+    // Cleanup: восстанавливаем скролл при размонтировании
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [showModal, showFullScreenshot, showEditModal, showDeleteConfirm])
+
   // Date functions
   const openDatePicker = (ref: React.RefObject<DateInputWithPicker>) => {
     const input = ref.current
@@ -312,6 +434,8 @@ export default function AdminPage() {
     setShowModal(false)
     setSelectedCreative(null)
     setShowFullScreenshot(false)
+    setEditingField(null)
+    setFieldEditValue('')
   }
 
   // Edit functions
@@ -491,6 +615,175 @@ export default function AdminPage() {
     setSaving(false)
   }
 
+  // Quick edit field function
+  const startEditField = (fieldName: string, currentValue: string) => {
+    setEditingField(fieldName)
+    setFieldEditValue(currentValue)
+  }
+
+  const cancelEditField = () => {
+    setEditingField(null)
+    setFieldEditValue('')
+  }
+
+  const saveFieldEdit = async (fieldName: string) => {
+    if (!selectedCreative) return
+
+    try {
+      const formData = new FormData()
+      formData.append('creative_id', selectedCreative.id)
+      
+      // Always send all current field values to prevent them from being nullified
+      // Send current title (or new value if editing title)
+      formData.append('title', fieldName === 'title' ? fieldEditValue : (selectedCreative.title || ''))
+      
+      // Send current description (or new value if editing description)
+      formData.append('description', fieldName === 'description' ? fieldEditValue : (selectedCreative.description || ''))
+      
+      // Send current format (or new value if editing format)
+      formData.append('format', fieldName === 'format' ? fieldEditValue : (selectedCreative.formats?.code || ''))
+      
+      // Send current type (or new value if editing type)
+      formData.append('type', fieldName === 'type' ? fieldEditValue : (selectedCreative.types?.code || ''))
+      
+      // Send current placement (or new value if editing placement)
+      formData.append('placement', fieldName === 'placement' ? fieldEditValue : (selectedCreative.placements?.code || ''))
+      
+      // Send current country (or new value if editing country)
+      formData.append('country', fieldName === 'country' ? fieldEditValue : (selectedCreative.country_code || ''))
+      
+      // Send current platform (or new value if editing platform)
+      formData.append('platform', fieldName === 'platform' ? fieldEditValue : (selectedCreative.platforms?.code || ''))
+      
+      // Send current cloaking (or new value if editing cloaking)
+      formData.append('cloaking', fieldName === 'cloaking' ? (fieldEditValue === 'true' ? 'true' : 'false') : (selectedCreative.cloaking ? 'true' : 'false'))
+
+      // Preserve current URLs
+      formData.append('current_media_url', selectedCreative.media_url || '')
+      formData.append('current_thumbnail_url', selectedCreative.thumbnail_url || '')
+      formData.append('current_download_url', selectedCreative.download_url || '')
+      
+      // Preserve other fields that might be in the API
+      formData.append('landing_url', selectedCreative.landing_url || '')
+      formData.append('source_link', selectedCreative.source_link || '')
+      formData.append('source_device', selectedCreative.source_device || '')
+      
+      // Preserve captured_at if it exists
+      if (selectedCreative.captured_at) {
+        // Convert to datetime-local format for API
+        try {
+          const date = new Date(selectedCreative.captured_at)
+          if (!isNaN(date.getTime())) {
+            const year = date.getFullYear()
+            const month = String(date.getMonth() + 1).padStart(2, '0')
+            const day = String(date.getDate()).padStart(2, '0')
+            const hours = String(date.getHours()).padStart(2, '0')
+            const minutes = String(date.getMinutes()).padStart(2, '0')
+            formData.append('captured_at', `${year}-${month}-${day}T${hours}:${minutes}`)
+          }
+        } catch (e) {
+          console.error('Error formatting captured_at:', e)
+        }
+      }
+
+      const response = await fetch('/api/admin/update-creative', {
+        method: 'POST',
+        body: formData
+      })
+
+      const result = await response.json()
+
+      if (response.ok && result.creative) {
+        // Fetch the updated creative with all relations to ensure we have complete data
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        
+        if (supabaseUrl && supabaseKey) {
+          try {
+            // Fetch the updated creative with all relations
+            const creativeWithRelationsUrl = `${supabaseUrl}/rest/v1/creatives?id=eq.${selectedCreative.id}&select=*,formats(name,code),types(name,code),placements(name,code),countries(name),platforms(name,code)`
+            const creativeRes = await fetch(creativeWithRelationsUrl, {
+              headers: { apikey: supabaseKey }
+            })
+            const creativeData = await creativeRes.json()
+            
+            if (creativeData && creativeData.length > 0) {
+              const fullUpdatedCreative = creativeData[0] as Creative
+              
+              // Update selectedCreative with fresh data from API
+              setSelectedCreative(fullUpdatedCreative)
+              
+              // Also update in the creatives list to keep them in sync
+              setCreatives(prevCreatives => 
+                prevCreatives.map(c => c.id === fullUpdatedCreative.id ? fullUpdatedCreative : c)
+              )
+            } else {
+              // Fallback: update with API response data and local mappings
+              const updatedCreative = { ...selectedCreative } as Creative
+              
+              // Update the field that was edited
+              if (fieldName === 'title') {
+                updatedCreative.title = fieldEditValue
+              } else if (fieldName === 'description') {
+                updatedCreative.description = fieldEditValue || undefined
+              } else if (fieldName === 'format') {
+                const format = formats.find(f => f.code === fieldEditValue)
+                if (format) updatedCreative.formats = { name: format.name, code: format.code }
+              } else if (fieldName === 'type') {
+                const type = types.find(t => t.code === fieldEditValue)
+                if (type) updatedCreative.types = { name: type.name, code: type.code }
+              } else if (fieldName === 'placement') {
+                const placement = placements.find(p => p.code === fieldEditValue)
+                if (placement) updatedCreative.placements = { name: placement.name, code: placement.code }
+              } else if (fieldName === 'country') {
+                updatedCreative.country_code = fieldEditValue
+                const country = countries.find(c => c.code === fieldEditValue)
+                if (country) updatedCreative.countries = { name: country.name }
+              } else if (fieldName === 'platform') {
+                const platform = platforms.find(p => p.code === fieldEditValue)
+                if (platform) updatedCreative.platforms = { name: platform.name, code: platform.code }
+              } else if (fieldName === 'cloaking') {
+                updatedCreative.cloaking = fieldEditValue === 'true'
+              }
+              
+              setSelectedCreative(updatedCreative)
+              setCreatives(prevCreatives => 
+                prevCreatives.map(c => c.id === updatedCreative.id ? updatedCreative : c)
+              )
+            }
+          } catch (error) {
+            console.error('Error fetching updated creative:', error)
+            // Fallback: update local state with the edited value
+            const updatedCreative = { ...selectedCreative } as Creative
+            if (fieldName === 'title') {
+              updatedCreative.title = fieldEditValue
+            } else if (fieldName === 'description') {
+              updatedCreative.description = fieldEditValue || undefined
+            }
+            setSelectedCreative(updatedCreative)
+          }
+        } else {
+          // Fallback: update local state only
+          const updatedCreative = { ...selectedCreative } as Creative
+          if (fieldName === 'title') {
+            updatedCreative.title = fieldEditValue
+          } else if (fieldName === 'description') {
+            updatedCreative.description = fieldEditValue || undefined
+          }
+          setSelectedCreative(updatedCreative)
+        }
+        
+        setEditingField(null)
+        setFieldEditValue('')
+      } else {
+        alert(`Ошибка при сохранении: ${result.error || 'Неизвестная ошибка'}`)
+      }
+    } catch (error) {
+      console.error('Error saving field:', error)
+      alert('Ошибка при сохранении')
+    }
+  }
+
   const deleteCreativeFile = async (fileType: 'media' | 'thumbnail' | 'download') => {
     if (!editingCreative) return
 
@@ -576,6 +869,51 @@ export default function AdminPage() {
     } catch (error) {
       console.error('Error deleting creatives:', error)
       alert('Ошибка при удалении креативов')
+    }
+  }
+
+  const deleteSingleCreative = async (creativeId: string, creativeTitle?: string) => {
+    const titleText = creativeTitle ? ` "${creativeTitle}"` : ''
+    if (!confirm(`Вы уверены, что хотите удалить креатив${titleText}?`)) {
+      return
+    }
+
+    try {
+      const response = await fetch('/api/admin/delete-creatives', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ creativeIds: [creativeId] })
+      })
+
+      const result = await response.json()
+
+      if (response.ok) {
+        // Remove from selection if selected
+        setSelectedCreatives(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(creativeId)
+          return newSet
+        })
+        
+        // Close modal if this creative was being viewed
+        if (selectedCreative?.id === creativeId) {
+          setShowModal(false)
+          setSelectedCreative(null)
+        }
+        
+        // Refresh data
+        await loadData()
+        await loadModerationStats()
+        alert('Креатив успешно удален')
+      } else {
+        alert(`Ошибка при удалении: ${result.error || 'Неизвестная ошибка'}`)
+      }
+
+    } catch (error) {
+      console.error('Error deleting creative:', error)
+      alert('Ошибка при удалении креатива')
     }
   }
 
@@ -1182,33 +1520,32 @@ export default function AdminPage() {
     <div className="min-h-screen bg-gray-950">
       {/* Header */}
       <header className="bg-gray-900 border-b border-gray-800">
-        <div className="max-w-7xl mx-auto px-6">
-          {/* Top Row - Title and Logout */}
-          <div className="flex items-center justify-between py-4 border-b border-gray-800">
-            <h1 className="text-2xl font-bold text-white">Admin Panel</h1>
-            <div className="flex items-center space-x-2">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          {/* Title and Buttons Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 border-b border-gray-800 gap-4">
+            <h1 className="text-xl sm:text-2xl font-bold text-white">Admin Panel</h1>
+          
+            {/* Buttons - Mobile: centered, PC: right aligned */}
+            <div className="flex items-center justify-center sm:justify-end space-x-2">
               <button
                 onClick={toggleTheme}
-                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                className="btn btn-ghost"
                 title={isLightTheme ? 'Переключить на темную тему' : 'Переключить на светлую тему'}
               >
-                <span>{isLightTheme ? '🌙' : '☀️'}</span>
-                <span>{isLightTheme ? 'Темная' : 'Светлая'}</span>
+                {isLightTheme ? 'Темная' : 'Светлая'}
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                className="btn btn-ghost"
                 title="Обновить страницу"
               >
-                <span>🔄</span>
-                <span>Обновить</span>
+                Обновить
               </button>
               <button
                 onClick={handleLogout}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                className="btn btn-danger"
               >
-                <span>🚪</span>
-                <span>Выйти</span>
+                Выйти
               </button>
             </div>
           </div>
@@ -1249,15 +1586,27 @@ export default function AdminPage() {
                 <span>📢</span>
                 <span>Настройки рекламы</span>
               </button>
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                  activeTab === 'dashboard' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-300 hover:text-white hover:bg-gray-800'
+                }`}
+              >
+                <span>⚙️</span>
+                <span>Настройка дашборда</span>
+              </button>
             </div>
           </div>
 
           {/* Info Bar - Only for List Tab */}
           {activeTab === 'list' && (
-            <div className="py-3 flex items-center justify-between">
+            <div className="py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
               {/* Left Side - Statistics */}
-              <div className="flex items-center space-x-6">
-                <div className="text-sm text-gray-300">
+              <div className="flex items-center justify-center sm:justify-start space-x-6">
+                {/* PC Version - Show "креативов" */}
+                <div className="hidden sm:block text-sm text-gray-300">
                   <span className="font-medium">{creatives.length}</span>
                   <span className="text-gray-400 ml-1">креативов</span>
                   {selectedCreatives.size > 0 && (
@@ -1269,7 +1618,8 @@ export default function AdminPage() {
                   )}
                 </div>
                 
-                <div className="h-6 w-px bg-gray-700"></div>
+                {/* PC Version - Show divider */}
+                <div className="hidden sm:block h-6 w-px bg-gray-700"></div>
                 
                 <div className="flex items-center space-x-3">
                   <div className="flex items-center gap-2 bg-yellow-600/20 border border-yellow-600/30 rounded-lg px-3 py-1.5">
@@ -1287,10 +1637,10 @@ export default function AdminPage() {
 
               {/* Right Side - Action Buttons */}
               {selectedCreatives.size > 0 && (
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center justify-center sm:justify-end space-x-2">
                   <button
                     onClick={() => moderateCreatives('approve', Array.from(selectedCreatives))}
-                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-lg shadow-green-600/20"
+                    className="btn btn-success"
                   >
                     <span>✅</span>
                     <span>Опубликовать ({selectedCreatives.size})</span>
@@ -1517,13 +1867,13 @@ export default function AdminPage() {
                   })
                   loadData()
                 }}
-                className="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                className="btn btn-secondary flex-1"
               >
                 Reset
               </button>
               <button
                 onClick={applyFilters}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                className="btn btn-primary flex-1"
               >
                 Apply
               </button>
@@ -1687,7 +2037,7 @@ export default function AdminPage() {
                               e.stopPropagation()
                               moderateSingle('approve', creative.id)
                             }}
-                            className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded transition-colors"
+                            className="btn btn-success btn-sm flex-1"
                           >
                             ✅ Опубликовать
                           </button>
@@ -1698,11 +2048,25 @@ export default function AdminPage() {
                               e.stopPropagation()
                               moderateSingle('draft', creative.id)
                             }}
-                            className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs px-2 py-1 rounded transition-colors"
+                            className="btn btn-sm flex-1"
+                            style={{ backgroundColor: '#ca8a04', color: 'white' }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#a16207'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ca8a04'}
                           >
                             🆕 В новые
                           </button>
                         )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            deleteSingleCreative(creative.id, creative.title)
+                          }}
+                          className="btn btn-danger btn-sm flex items-center justify-center gap-1"
+                          title="Удалить креатив"
+                        >
+                          <TrashIcon />
+                          <span>Удалить</span>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1960,18 +2324,14 @@ export default function AdminPage() {
             <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-700">
               <button
                 onClick={resetCreateForm}
-                className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-colors"
+                className="btn btn-secondary"
               >
-                🔄 Очистить
+                Очистить
               </button>
               <button
                 onClick={createCreative}
                 disabled={creating || !createForm.title.trim()}
-                className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-                  creating || !createForm.title.trim()
-                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
+                className="btn btn-primary"
               >
                 {creating ? '⏳ Создание...' : '✅ Создать креатив'}
               </button>
@@ -1982,13 +2342,13 @@ export default function AdminPage() {
 
       {/* Ads Settings Tab */}
       {activeTab === 'ads' && (
-        <main className="max-w-7xl mx-auto px-6 py-8">
-          <div className="bg-gray-900 rounded-lg p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-white">📢 Настройки рекламы</h2>
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
+          <div className="bg-gray-900 rounded-lg p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
+              <h2 className="text-xl sm:text-2xl font-bold text-white">📢 Настройки рекламы</h2>
               <button
                 onClick={() => openAdEditor()}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+                className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
               >
                 ➕ Добавить рекламный блок
               </button>
@@ -2020,35 +2380,35 @@ export default function AdminPage() {
                         key={ad.id}
                         className="bg-gray-800 rounded-lg border border-gray-700 p-4"
                       >
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <h3 className="text-lg font-semibold text-white">{ad.title || ad.position}</h3>
-                              <span className={`text-xs px-2 py-1 rounded ${
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
+                              <h3 className="text-base sm:text-lg font-semibold text-white break-words">{ad.title || ad.position}</h3>
+                              <span className={`text-xs px-2 py-1 rounded whitespace-nowrap ${
                                 ad.enabled ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'
                               }`}>
                                 {ad.enabled ? '✅ Включено' : '❌ Выключено'}
                               </span>
-                              <span className="text-xs text-gray-400">Позиция: {ad.position}</span>
-                              <span className="text-xs text-gray-400">Тип: {ad.type}</span>
+                              <span className="text-xs text-gray-400 whitespace-nowrap">Позиция: {ad.position}</span>
+                              <span className="text-xs text-gray-400 whitespace-nowrap">Тип: {ad.type}</span>
                             </div>
                             {ad.content && (
-                              <p className="text-sm text-gray-400 mb-2 line-clamp-2">{ad.content}</p>
+                              <p className="text-sm text-gray-400 mb-2 line-clamp-2 break-words">{ad.content}</p>
                             )}
                             {ad.image_url && (
-                              <p className="text-xs text-gray-500">Изображение: {ad.image_url}</p>
+                              <p className="text-xs text-gray-500 break-all">Изображение: {ad.image_url}</p>
                             )}
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex flex-col sm:flex-row gap-2 sm:ml-4">
                             <button
                               onClick={() => openAdEditor(ad)}
-                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors"
+                              className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors whitespace-nowrap"
                             >
                               ✏️ Редактировать
                             </button>
                             <button
                               onClick={() => deleteAdSettings(ad.position)}
-                              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition-colors"
+                              className="w-full sm:w-auto px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition-colors whitespace-nowrap"
                             >
                               🗑️ Удалить
                             </button>
@@ -2062,8 +2422,8 @@ export default function AdminPage() {
             ) : (
               <>
                 {/* Ad Editor Form */}
-                <div className="bg-gray-800 rounded-lg p-6">
-                  <h3 className="text-xl font-bold text-white mb-6">
+                <div className="bg-gray-800 rounded-lg p-4 sm:p-6">
+                  <h3 className="text-lg sm:text-xl font-bold text-white mb-4 sm:mb-6">
                     {editingAd ? 'Редактировать рекламный блок' : 'Создать рекламный блок'}
                   </h3>
 
@@ -2245,7 +2605,7 @@ export default function AdminPage() {
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-700">
+                  <div className="flex flex-col sm:flex-row sm:justify-end gap-3 sm:gap-4 mt-8 pt-6 border-t border-gray-700">
                     <button
                       onClick={() => {
                         setEditingAd(null)
@@ -2262,14 +2622,14 @@ export default function AdminPage() {
                           priority: 0
                         })
                       }}
-                      className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-colors"
+                      className="w-full sm:w-auto px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-colors"
                     >
                       Отмена
                     </button>
                     <button
                       onClick={saveAdSettings}
                       disabled={loadingAds || !adForm.position || !adForm.type || (adForm.type === 'code' && !adForm.content) || (adForm.type === 'image' && !adForm.image_url) || (adForm.type === 'html' && !adForm.content)}
-                      className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+                      className={`w-full sm:w-auto px-6 py-2 rounded-lg font-medium transition-colors ${
                         loadingAds || !adForm.position || !adForm.type || (adForm.type === 'code' && !adForm.content) || (adForm.type === 'image' && !adForm.image_url) || (adForm.type === 'html' && !adForm.content)
                           ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
                           : 'bg-blue-600 hover:bg-blue-700 text-white'
@@ -2326,148 +2686,29 @@ export default function AdminPage() {
               <h2 className="text-2xl font-bold text-white">
                 {selectedCreative.title || 'Creative Details'}
               </h2>
-              <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-3">
                 {selectedCreative.download_url && (
                   <a
                     href={selectedCreative.download_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     download
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                    className="btn btn-primary"
                   >
-                    <span>📥</span>
-                    <span>Download Archive</span>
+                    Download Archive
                   </a>
                 )}
-                {selectedCreative.source_link && (
-                  <a
-                    href={selectedCreative.source_link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
-                  >
-                    <span>🔗</span>
-                    <span>Link</span>
-                  </a>
-                )}
-                <button
-                  onClick={() => openEditModal(selectedCreative)}
-                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
-                >
-                  <EditIcon />
-                  <span>Edit</span>
-                </button>
-                <button
-                  onClick={closeModal}
-                  className="text-gray-400 hover:text-white text-2xl font-bold ml-2"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Left Column - Information */}
-                <div>
-                  <h3 className="text-lg font-semibold text-white mb-4">Information</h3>
-                  
-                  {/* Title */}
-                  <div className="mb-4 pb-4 border-b border-gray-700">
-                    <div className="text-sm text-gray-400 mb-1">Title</div>
-                    <div className="text-base text-white font-medium">
-                      {selectedCreative.title || '-'}
-                    </div>
-                  </div>
-
-                  {/* Description */}
-                  {selectedCreative.description && (
-                    <div className="mb-4 pb-4 border-b border-gray-700">
-                      <div className="text-sm text-gray-400 mb-1">Description</div>
-                      <div className="text-base text-gray-300">
-                        {selectedCreative.description}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Metadata */}
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
-                      <span className="text-sm text-gray-400">Format:</span>
-                      <span className="text-sm text-white underline font-medium">
-                        {selectedCreative.formats?.name || '-'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
-                      <span className="text-sm text-gray-400">Type:</span>
-                      <span className="text-sm text-white underline font-medium">
-                        {selectedCreative.types?.name || '-'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
-                      <span className="text-sm text-gray-400">Placement:</span>
-                      <span className="text-sm text-white underline font-medium">
-                        {selectedCreative.placements?.name || '-'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
-                      <span className="text-sm text-gray-400">Country:</span>
-                      <span className="text-sm text-white underline font-medium">
-                        {selectedCreative.countries?.name || '-'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
-                      <span className="text-sm text-gray-400">Platform:</span>
-                      <span className="text-sm text-white underline font-medium">
-                        {selectedCreative.platforms?.name || '-'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
-                      <span className="text-sm text-gray-400">Cloaking:</span>
-                      <span className={`text-sm font-medium ${
-                        selectedCreative.cloaking ? 'text-red-400' : 'text-green-400'
-                      }`}>
-                        {selectedCreative.cloaking ? 'Yes' : 'No'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center py-2">
-                      <span className="text-sm text-gray-400">Captured:</span>
-                      <span className="text-sm text-gray-300">
-                        {new Date(selectedCreative.captured_at).toLocaleDateString()}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right Column - Media */}
-                <div>
-                  {selectedCreative.media_url ? (
-                    <div className="w-full">
-                      <img
-                        src={selectedCreative.media_url}
-                        alt={selectedCreative.title || 'Creative'}
-                        className="w-full h-auto rounded-lg border border-gray-700 shadow-sm"
-                      />
-                    </div>
-                  ) : (
-                    <div className="aspect-video bg-gray-800 flex items-center justify-center rounded-lg border border-gray-700">
-                      <div className="text-center text-gray-400">
-                        <div className="text-4xl mb-2">📄</div>
-                        <p>No Preview Available</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Page Preview Button - Bottom */}
-              {selectedCreative.download_url && (
-                <div className="mt-6 w-full border-t border-gray-700 pt-4">
+                {selectedCreative.download_url && (
                   <button
                     onClick={async (e) => {
                       e.stopPropagation()
                       try {
+                        // Показываем индикатор загрузки (опционально)
+                        const button = e.currentTarget
+                        const originalText = button.innerHTML
+                        button.disabled = true
+                        button.innerHTML = '<span>⏳ Loading...</span>'
+                        
                         // Загружаем файл в кеш браузера
                         const response = await fetch(selectedCreative.download_url!)
                         if (!response.ok) {
@@ -2477,19 +2718,42 @@ export default function AdminPage() {
                         // Получаем текст файла
                         const text = await response.text()
                         
+                        // Восстанавливаем кнопку
+                        button.disabled = false
+                        button.innerHTML = originalText
+                        
+                        // Проверяем, что мы получили контент
+                        if (!text || text.length === 0) {
+                          throw new Error('File content is empty')
+                        }
+                        
                         // Проверяем, это MHTML или обычный HTML
                         let htmlContent = text
                         
                         if (text.includes('Content-Type: multipart/related') || text.includes('boundary=')) {
                           // Это MHTML, извлекаем HTML и CSS
-                          const boundaryMatch = text.match(/boundary=["']?([^"'\s;]+)["']?/i)
+                          // Ищем boundary в заголовке MHTML
+                          let boundaryMatch = text.match(/boundary=["']?([^"'\s;]+)["']?/i)
+                          
+                          // Если не нашли в первой строке, ищем в Content-Type
+                          if (!boundaryMatch) {
+                            const contentTypeMatch = text.match(/Content-Type:\s*multipart\/related[^]*?boundary=["']?([^"'\s;]+)["']?/i)
+                            if (contentTypeMatch) {
+                              boundaryMatch = contentTypeMatch
+                            }
+                          }
+                          
                           const cssResources = new Map()
+                          const imageResources = new Map()
                           
                           if (boundaryMatch) {
                             const boundary = `--${boundaryMatch[1]}`
-                            const parts = text.split(boundary)
+                            // Разделяем на части, но пропускаем первую часть (заголовки MHTML)
+                            const allParts = text.split(boundary)
+                            // Пропускаем первую часть (заголовки MHTML) и последнюю (пустая строка после последнего boundary)
+                            const parts = allParts.slice(1, allParts.length - 1)
                             
-                            // Сначала собираем все CSS ресурсы
+                            // Собираем все ресурсы (CSS и изображения)
                             for (const part of parts) {
                               const headerEnd = part.indexOf('\r\n\r\n') !== -1 
                                 ? part.indexOf('\r\n\r\n') + 4
@@ -2513,10 +2777,65 @@ export default function AdminPage() {
                                   cssResources.set(location, body)
                                 }
                               }
+                              
+                              // Ищем изображения (jpg, png, gif, webp, svg и т.д.)
+                              if (headers.includes('content-type: image/')) {
+                                const contentTypeMatch = headers.match(/content-type:\s*([^\r\n]+)/i)
+                                const contentType = contentTypeMatch ? contentTypeMatch[1].trim().toLowerCase() : 'image/jpeg'
+                                
+                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
+                                                     headers.match(/content-id:\s*<([^>]+)>/i)
+                                const location = locationMatch ? locationMatch[1].trim() : null
+                                
+                                if (location && body.length > 0) {
+                                  try {
+                                    // Проверяем Content-Transfer-Encoding
+                                    const encodingMatch = headers.match(/content-transfer-encoding:\s*([^\r\n]+)/i)
+                                    const encoding = encodingMatch ? encodingMatch[1].trim().toLowerCase() : ''
+                                    
+                                    let imageData = body.trim()
+                                    
+                                    // Если изображение уже в формате data URI, используем как есть
+                                    if (imageData.startsWith('data:')) {
+                                      imageResources.set(location, imageData)
+                                      continue
+                                    }
+                                    
+                                    // Если encoding = base64 или изображение выглядит как base64
+                                    if (encoding === 'base64' || /^[A-Za-z0-9+/=\s]+$/.test(imageData)) {
+                                      // Удаляем все пробелы и переносы строк из base64
+                                      const cleanBody = imageData.replace(/[\r\n\s]/g, '')
+                                      imageData = `data:${contentType};base64,${cleanBody}`
+                                    } else {
+                                      // Для бинарных данных в браузере нужно использовать другой подход
+                                      // Но обычно в MHTML изображения уже в base64
+                                      // Пробуем использовать как base64
+                                      const cleanBody = imageData.replace(/[\r\n\s]/g, '')
+                                      if (/^[A-Za-z0-9+/=]+$/.test(cleanBody)) {
+                                        imageData = `data:${contentType};base64,${cleanBody}`
+                                      } else {
+                                        // Если не base64, пропускаем (в браузере сложно работать с бинарными данными)
+                                        continue
+                                      }
+                                    }
+                                    
+                                    // Сохраняем изображение
+                                    imageResources.set(location, imageData)
+                                  } catch (e) {
+                                    // Если не удалось обработать изображение, пропускаем его
+                                    continue
+                                  }
+                                }
+                              }
                             }
                             
                             // Ищем часть с основным HTML контентом
                             let foundMainHtml = false
+                            let mainHtmlContent = ''
+                            let maxHtmlLength = 0
+                            let baseUrl = '' // Базовый URL для разрешения относительных путей
+                            
+                            // Сначала ищем HTML с Content-Location (основная страница, не iframe)
                             for (const part of parts) {
                               const headerEnd = part.indexOf('\r\n\r\n') !== -1 
                                 ? part.indexOf('\r\n\r\n') + 4
@@ -2527,28 +2846,75 @@ export default function AdminPage() {
                               if (headerEnd === -1) continue
                               
                               const headers = part.substring(0, headerEnd).toLowerCase()
-                              const body = part.substring(headerEnd).trim()
+                              let body = part.substring(headerEnd).trim()
+                              
+                              // Удаляем возможные заголовки MHTML из начала body (если они там остались)
+                              // Ищем начало HTML контента - должно начинаться с <!DOCTYPE или <html
+                              const htmlStartIndex = Math.max(
+                                body.indexOf('<!DOCTYPE'),
+                                body.indexOf('<html')
+                              )
+                              
+                              if (htmlStartIndex > 0) {
+                                // Если HTML начинается не с начала body, обрезаем все заголовки перед ним
+                                body = body.substring(htmlStartIndex)
+                              }
                               
                               // Ищем HTML блок с Content-Location (основная страница, не iframe)
+                              // Исключаем iframe контент и другие встроенные элементы
                               if (headers.includes('content-type: text/html') && 
                                   headers.includes('content-location:') &&
-                                  body.includes('<!DOCTYPE')) {
-                                const htmlStart = body.indexOf('<!DOCTYPE')
+                                  (body.includes('<!DOCTYPE') || body.startsWith('<html'))) {
+                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i)
+                                const location = locationMatch ? locationMatch[1].trim() : ''
+                                
+                                // Сохраняем базовый URL
+                                if (location && !baseUrl) {
+                                  try {
+                                    const urlObj = new URL(location)
+                                    baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1)}`
+                                  } catch {
+                                    baseUrl = location.substring(0, location.lastIndexOf('/') + 1)
+                                  }
+                                }
+                                
+                                // Пропускаем iframe, embed и другие встроенные элементы
+                                if (location.includes('iframe') || 
+                                    location.includes('embed') || 
+                                    location.includes('frame') ||
+                                    location.includes('widget') ||
+                                    location.includes('popup')) {
+                                  continue
+                                }
+                                
+                                // Ищем начало HTML (может быть <!DOCTYPE или <html)
+                                const htmlStart = Math.max(
+                                  body.indexOf('<!DOCTYPE'),
+                                  body.indexOf('<html')
+                                )
+                                
                                 if (htmlStart !== -1) {
-                                  htmlContent = body.substring(htmlStart)
-                                  // Обрезаем строго по первому </html>
-                                  const htmlEnd = htmlContent.indexOf('</html>')
+                                  const candidate = body.substring(htmlStart)
+                                  const htmlEnd = candidate.indexOf('</html>')
                                   if (htmlEnd !== -1) {
-                                    htmlContent = htmlContent.substring(0, htmlEnd + 7)
-                                    foundMainHtml = true
-                                    break
+                                    const htmlBlock = candidate.substring(0, htmlEnd + 7)
+                                    // Берем самый большой HTML блок с Content-Location
+                                    if (htmlBlock.length > maxHtmlLength) {
+                                      mainHtmlContent = htmlBlock
+                                      maxHtmlLength = htmlBlock.length
+                                      foundMainHtml = true
+                                    }
                                   }
                                 }
                               }
                             }
                             
-                            // Если не нашли через Content-Location, берем первый большой HTML блок
-                            if (!foundMainHtml) {
+                            // Если нашли через Content-Location, используем его
+                            if (foundMainHtml && mainHtmlContent.length > 0) {
+                              htmlContent = mainHtmlContent
+                            } else {
+                              // Если не нашли через Content-Location, берем самый большой HTML блок
+                              maxHtmlLength = 0
                               for (const part of parts) {
                                 const headerEnd = part.indexOf('\r\n\r\n') !== -1 
                                   ? part.indexOf('\r\n\r\n') + 4
@@ -2559,22 +2925,60 @@ export default function AdminPage() {
                                 if (headerEnd === -1) continue
                                 
                                 const headers = part.substring(0, headerEnd).toLowerCase()
-                                const body = part.substring(headerEnd).trim()
+                                let body = part.substring(headerEnd).trim()
                                 
-                                if (headers.includes('content-type: text/html') && body.includes('<!DOCTYPE')) {
-                                  const htmlStart = body.indexOf('<!DOCTYPE')
-                                  if (htmlStart !== -1) {
-                                    const candidate = body.substring(htmlStart)
+                                // Удаляем возможные заголовки MHTML из начала body
+                                const htmlStartIndex = Math.max(
+                                  body.indexOf('<!DOCTYPE'),
+                                  body.indexOf('<html')
+                                )
+                                
+                                if (htmlStartIndex > 0) {
+                                  // Если HTML начинается не с начала body, обрезаем все заголовки перед ним
+                                  body = body.substring(htmlStartIndex)
+                                }
+                                
+                                // Пропускаем части без HTML или с подозрительными заголовками
+                                if (!headers.includes('content-type: text/html') || 
+                                    (!body.includes('<!DOCTYPE') && !body.startsWith('<html'))) {
+                                  continue
+                                }
+                                
+                                // Пропускаем iframe и встроенный контент
+                                if (headers.includes('content-location:')) {
+                                  const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i)
+                                  const location = locationMatch ? locationMatch[1].trim().toLowerCase() : ''
+                                  if (location.includes('iframe') || 
+                                      location.includes('embed') || 
+                                      location.includes('frame') ||
+                                      location.includes('widget') ||
+                                      location.includes('popup')) {
+                                    continue
+                                  }
+                                }
+                                
+                                // Ищем начало HTML (может быть <!DOCTYPE или <html)
+                                const htmlStart = Math.max(
+                                  body.indexOf('<!DOCTYPE'),
+                                  body.indexOf('<html')
+                                )
+                                
+                                if (htmlStart !== -1) {
+                                  const candidate = body.substring(htmlStart)
+                                  const htmlEnd = candidate.indexOf('</html>')
+                                  if (htmlEnd !== -1) {
+                                    const htmlBlock = candidate.substring(0, htmlEnd + 7)
                                     // Берем самый большой HTML блок (основной контент)
-                                    if (!foundMainHtml || candidate.length > htmlContent.length) {
-                                      htmlContent = candidate
-                                      const htmlEnd = htmlContent.indexOf('</html>')
-                                      if (htmlEnd !== -1) {
-                                        htmlContent = htmlContent.substring(0, htmlEnd + 7)
-                                      }
+                                    if (htmlBlock.length > maxHtmlLength && htmlBlock.length > 1000) {
+                                      mainHtmlContent = htmlBlock
+                                      maxHtmlLength = htmlBlock.length
                                     }
                                   }
                                 }
+                              }
+                              
+                              if (mainHtmlContent.length > 0) {
+                                htmlContent = mainHtmlContent
                               }
                             }
                             
@@ -2605,12 +3009,231 @@ export default function AdminPage() {
                               // Заменяем ссылки на cid: CSS файлы на встроенные стили
                               cssResources.forEach((cssContent, location) => {
                                 // Заменяем cid: ссылки в href
-                                const cidPattern = new RegExp(`cid:${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi')
                                 htmlContent = htmlContent.replace(
                                   new RegExp(`<link[^>]*href=["']cid:${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`, 'gi'),
                                   ''
                                 )
                               })
+                            }
+                            
+                            // Функция для разрешения относительных URL
+                            const resolveUrl = (url: string, base: string): string => {
+                              if (!url) return url
+                              
+                              // Если уже абсолютный URL
+                              if (url.startsWith('http://') || url.startsWith('https://')) {
+                                return url
+                              }
+                              
+                              // Если протокол-относительный URL (//example.com/image.jpg)
+                              if (url.startsWith('//')) {
+                                try {
+                                  const baseUrl = new URL(base || 'http://example.com')
+                                  return `${baseUrl.protocol}${url}`
+                                } catch {
+                                  return `https:${url}`
+                                }
+                              }
+                              
+                              // Если абсолютный путь (/image.jpg)
+                              if (url.startsWith('/')) {
+                                try {
+                                  const baseUrl = new URL(base || 'http://example.com')
+                                  return `${baseUrl.protocol}//${baseUrl.host}${url}`
+                                } catch {
+                                  return url
+                                }
+                              }
+                              
+                              // Относительный путь (image.jpg или ../image.jpg)
+                              try {
+                                const baseUrl = new URL(base || 'http://example.com')
+                                return new URL(url, baseUrl).toString()
+                              } catch {
+                                return url
+                              }
+                            }
+                            
+                            // Функция для нормализации URL (для сравнения)
+                            const normalizeUrlForMatch = (url: string): string => {
+                              if (!url) return ''
+                              try {
+                                const urlObj = new URL(url, baseUrl || 'http://example.com')
+                                // Убираем протокол, домен, query и hash для сравнения
+                                return urlObj.pathname.toLowerCase()
+                              } catch {
+                                // Если не URL, возвращаем путь без query и hash
+                                return url.split('?')[0].split('#')[0].toLowerCase()
+                              }
+                            }
+                            
+                            // Заменяем ссылки на изображения из MHTML на встроенные data URIs
+                            if (htmlContent && imageResources.size > 0) {
+                              // Создаем карту нормализованных путей для быстрого поиска
+                              const imageMap = new Map<string, string>()
+                              imageResources.forEach((imageData, location) => {
+                                // Сохраняем оригинальный путь (в разных вариантах регистра)
+                                imageMap.set(location.toLowerCase(), imageData)
+                                imageMap.set(location, imageData)
+                                
+                                // Сохраняем нормализованный путь
+                                const normalized = normalizeUrlForMatch(location)
+                                if (normalized) {
+                                  imageMap.set(normalized, imageData)
+                                  // Также сохраняем с ведущим слешем
+                                  if (!normalized.startsWith('/')) {
+                                    imageMap.set(`/${normalized}`, imageData)
+                                  }
+                                }
+                                
+                                // Сохраняем только имя файла
+                                const fileName = location.split('/').pop()?.split('?')[0]?.toLowerCase()
+                                if (fileName && fileName.includes('.')) {
+                                  imageMap.set(fileName, imageData)
+                                  // Также с разными вариантами пути
+                                  imageMap.set(`./${fileName}`, imageData)
+                                  imageMap.set(`../${fileName}`, imageData)
+                                }
+                                
+                                // Если есть baseUrl, разрешаем относительные пути
+                                if (baseUrl) {
+                                  try {
+                                    const resolved = resolveUrl(location, baseUrl)
+                                    if (resolved !== location) {
+                                      imageMap.set(resolved.toLowerCase(), imageData)
+                                      const resolvedNormalized = normalizeUrlForMatch(resolved)
+                                      if (resolvedNormalized) {
+                                        imageMap.set(resolvedNormalized, imageData)
+                                      }
+                                    }
+                                  } catch (e) {
+                                    // Игнорируем ошибки разрешения URL
+                                  }
+                                }
+                              })
+                              
+                              // Заменяем все ссылки на изображения
+                              imageMap.forEach((imageData, searchKey) => {
+                                // Экранируем для regex
+                                const escaped = searchKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                
+                                // Заменяем в src атрибутах
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(src=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    // Проверяем, что это действительно изображение
+                                    if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                        url.includes('image') || 
+                                        url.match(/data:image/i)) {
+                                      return `${prefix}${imageData}${suffix}`
+                                    }
+                                    return match
+                                  }
+                                )
+                                
+                                // Заменяем в srcset
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(srcset=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    // Проверяем, что это действительно изображение
+                                    if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                        url.includes('image')) {
+                                      return `${prefix}${imageData}${suffix}`
+                                    }
+                                    return match
+                                  }
+                                )
+                                
+                                // Заменяем в data-src (lazy loading)
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(data-src=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    // Проверяем, что это действительно изображение
+                                    if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                        url.includes('image')) {
+                                      return `${prefix}${imageData}${suffix}`
+                                    }
+                                    return match
+                                  }
+                                )
+                                
+                                // Заменяем cid: ссылки
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`cid:${escaped}`, 'gi'),
+                                  imageData
+                                )
+                                
+                                // Заменяем в inline стилях (style="background-image: url(...)")
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(style=["'][^"']*background-image:\\s*url\\(["']?)([^"')]*${escaped}[^"')]*)(["']?\\)[^"']*["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                )
+                                
+                                // Также заменяем в других CSS свойствах со ссылками на изображения
+                                htmlContent = htmlContent.replace(
+                                  new RegExp(`(style=["'][^"']*:\\s*url\\(["']?)([^"')]*${escaped}[^"')]*)(["']?\\)[^"']*["'])`, 'gi'),
+                                  (match, prefix, url, suffix) => {
+                                    // Проверяем, что это изображение
+                                    if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                        url.includes('image')) {
+                                      return `${prefix}${imageData}${suffix}`
+                                    }
+                                    return match
+                                  }
+                                )
+                              })
+                              
+                              // Также обрабатываем пути в CSS
+                              const updatedCssResources = new Map<string, string>()
+                              cssResources.forEach((cssContent, cssLocation) => {
+                                let updatedCss = cssContent
+                                
+                                // Обрабатываем все возможные варианты путей к изображениям
+                                imageMap.forEach((imageData, searchKey) => {
+                                  const escaped = searchKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                  
+                                  // Заменяем в CSS url() с разными вариантами кавычек и без них
+                                  updatedCss = updatedCss.replace(
+                                    new RegExp(`url\\(["']?[^"')]*${escaped}[^"')]*["']?\\)`, 'gi'),
+                                    `url(${imageData})`
+                                  )
+                                  
+                                  // Также заменяем относительные пути, разрешая их через baseUrl
+                                  if (baseUrl) {
+                                    const resolvedUrl = resolveUrl(searchKey, baseUrl)
+                                    if (resolvedUrl !== searchKey) {
+                                      const resolvedEscaped = resolvedUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                      updatedCss = updatedCss.replace(
+                                        new RegExp(`url\\(["']?[^"')]*${resolvedEscaped}[^"')]*["']?\\)`, 'gi'),
+                                        `url(${imageData})`
+                                      )
+                                    }
+                                  }
+                                })
+                                
+                                updatedCssResources.set(cssLocation, updatedCss)
+                              })
+                              
+                              // Обновляем CSS ресурсы
+                              cssResources.clear()
+                              updatedCssResources.forEach((content, location) => {
+                                cssResources.set(location, content)
+                              })
+                              
+                              // Обновляем CSS в HTML после замены изображений
+                              if (cssResources.size > 0) {
+                                let headEnd = htmlContent.indexOf('</head>')
+                                if (headEnd !== -1) {
+                                  // Находим существующие style теги и обновляем их
+                                  const styleRegex = /<style[^>]*data-source=["']([^"']+)["'][^>]*>([\s\S]*?)<\/style>/gi
+                                  htmlContent = htmlContent.replace(styleRegex, (match, source, content) => {
+                                    const updatedContent = cssResources.get(source) || content
+                                    return `<style data-source="${source}">\n${updatedContent}\n</style>`
+                                  })
+                                }
+                              }
                             }
                           } else {
                             // Fallback: прямой поиск HTML
@@ -2618,6 +3241,11 @@ export default function AdminPage() {
                             if (htmlMatch) {
                               htmlContent = htmlMatch[0]
                             }
+                          }
+                          
+                          // Проверяем, что HTML контент был найден
+                          if (!htmlContent || htmlContent.trim().length === 0) {
+                            throw new Error('Failed to extract HTML content from MHTML file')
                           }
                           
                           // Финальная обрезка - строго по первому </html>
@@ -2629,6 +3257,26 @@ export default function AdminPage() {
                         
                         // Финальная очистка HTML контента
                         htmlContent = htmlContent.trim()
+                        
+                        // Проверяем, что после очистки контент не пустой
+                        if (!htmlContent || htmlContent.length === 0) {
+                          throw new Error('HTML content is empty after processing')
+                        }
+                        
+                        // Удаляем заголовки MHTML, если они попали в начало HTML (From, Subject, Date и т.д.)
+                        const mhtmlHeadersPattern = /^(From:|Snapshot-Content-Location:|Subject:|Date:|MIME-Version:|Content-Type:|boundary=)[^\n]*\n?/gmi
+                        htmlContent = htmlContent.replace(mhtmlHeadersPattern, '')
+                        
+                        // Ищем начало HTML контента после удаления заголовков
+                        const finalHtmlStart = Math.max(
+                          htmlContent.indexOf('<!DOCTYPE'),
+                          htmlContent.indexOf('<html')
+                        )
+                        
+                        if (finalHtmlStart > 0) {
+                          // Если HTML начинается не с начала, обрезаем все перед ним
+                          htmlContent = htmlContent.substring(finalHtmlStart)
+                        }
                         
                         // Строго обрезаем по первому </html> - это гарантирует, что мы не захватим
                         // дополнительные HTML блоки из других частей MHTML (например, iframe контент)
@@ -2654,11 +3302,54 @@ export default function AdminPage() {
                           }
                         }
                         
+                        // Валидация HTML контента перед созданием blob
+                        if (!htmlContent || htmlContent.trim().length === 0) {
+                          throw new Error('HTML content is empty')
+                        }
+                        
+                        // Проверяем, что HTML начинается с <!DOCTYPE или <html
+                        if (!htmlContent.includes('<!DOCTYPE') && !htmlContent.includes('<html')) {
+                          throw new Error('Invalid HTML content: missing DOCTYPE or html tag')
+                        }
+                        
+                        // Убеждаемся, что HTML имеет закрывающий тег </html>
+                        if (!htmlContent.includes('</html>')) {
+                          htmlContent += '\n</html>'
+                        }
+                        
+                        // Убеждаемся, что есть тег <body>
+                        if (!htmlContent.includes('<body')) {
+                          const htmlTagIndex = htmlContent.indexOf('<html')
+                          if (htmlTagIndex !== -1) {
+                            const htmlTagEnd = htmlContent.indexOf('>', htmlTagIndex)
+                            if (htmlTagEnd !== -1) {
+                              htmlContent = htmlContent.substring(0, htmlTagEnd + 1) + '\n<body>\n' + 
+                                           htmlContent.substring(htmlTagEnd + 1)
+                              // Добавляем закрывающий тег </body> перед </html>
+                              const htmlEndIndex = htmlContent.lastIndexOf('</html>')
+                              if (htmlEndIndex !== -1) {
+                                htmlContent = htmlContent.substring(0, htmlEndIndex) + '\n</body>\n' + 
+                                             htmlContent.substring(htmlEndIndex)
+                              }
+                            }
+                          }
+                        }
+                        
                         // Создаем blob из HTML контента
                         const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
                         
+                        // Проверяем размер blob
+                        if (blob.size === 0) {
+                          throw new Error('Blob size is zero')
+                        }
+                        
                         // Создаем blob URL
                         const blobUrl = URL.createObjectURL(blob)
+                        
+                        // Проверяем, что blob URL создан успешно
+                        if (!blobUrl || blobUrl.length === 0) {
+                          throw new Error('Failed to create blob URL')
+                        }
                         
                         // Открываем в новой вкладке
                         const newWindow = window.open(blobUrl, '_blank')
@@ -2666,21 +3357,1195 @@ export default function AdminPage() {
                         if (!newWindow) {
                           URL.revokeObjectURL(blobUrl)
                           alert('Please allow popups to preview the page')
+                        } else {
+                          // Даем время окну загрузиться перед возможной очисткой
+                          // Blob URL будет автоматически очищен браузером при закрытии вкладки
+                          // Но мы можем сохранить ссылку на blobUrl в window для отладки
+                          if (typeof window !== 'undefined') {
+                            (window as any).lastBlobUrl = blobUrl
+                          }
                         }
-                        
-                        // Blob URL будет автоматически очищен браузером при закрытии вкладки
                       } catch (error) {
-                        console.error('Error loading page:', error)
-                        alert('Failed to load page preview')
+                        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+                        alert(`Failed to load page preview: ${errorMessage}`)
+                      } finally {
+                        // Восстанавливаем кнопку в случае ошибки
+                        const button = e.currentTarget
+                        if (button) {
+                          button.disabled = false
+                          button.textContent = 'Preview Page'
+                        }
                       }
                     }}
-                    className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition-colors"
+                    className="btn btn-success"
                   >
-                    <span>👁️</span>
-                    <span>Preview Page</span>
+                    Preview Page
                   </button>
-                </div>
+                )}
+                {selectedCreative.source_link && (
+                  <a
+                    href={selectedCreative.source_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary"
+                  >
+                    Link
+                  </a>
+                )}
+                <button
+                  onClick={() => openEditModal(selectedCreative)}
+                  className="btn btn-success"
+                >
+                  <EditIcon />
+                  <span>Edit</span>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteSingleCreative(selectedCreative.id, selectedCreative.title)
+                  }}
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded transition-colors"
+                >
+                  <TrashIcon />
+                  <span>Delete</span>
+                </button>
+                <button
+                  onClick={closeModal}
+                  className="text-gray-400 hover:text-white text-2xl font-bold ml-2"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Mobile Buttons - Below Header */}
+            <div className="flex flex-col sm:hidden gap-2 p-4 border-b border-gray-700">
+              {selectedCreative.download_url && (
+                <a
+                  href={selectedCreative.download_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors text-center"
+                >
+                  Download Archive
+                </a>
               )}
+              {selectedCreative.download_url && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    try {
+                      // Показываем индикатор загрузки (опционально)
+                      const button = e.currentTarget
+                      const originalText = button.innerHTML
+                      button.disabled = true
+                      button.innerHTML = '<span>⏳ Loading...</span>'
+                      
+                      // Загружаем файл в кеш браузера
+                      const response = await fetch(selectedCreative.download_url!)
+                      if (!response.ok) {
+                        throw new Error('Failed to load file')
+                      }
+                      
+                      // Получаем текст файла
+                      const text = await response.text()
+                      
+                      // Восстанавливаем кнопку
+                      button.disabled = false
+                      button.innerHTML = originalText
+                      
+                      // Проверяем, что мы получили контент
+                      if (!text || text.length === 0) {
+                        throw new Error('File content is empty')
+                      }
+                      
+                      // Проверяем, это MHTML или обычный HTML
+                      let htmlContent = text
+                      
+                      if (text.includes('Content-Type: multipart/related') || text.includes('boundary=')) {
+                        // Это MHTML, извлекаем HTML и CSS
+                        // Ищем boundary в заголовке MHTML
+                        let boundaryMatch = text.match(/boundary=["']?([^"'\s;]+)["']?/i)
+                        
+                        // Если не нашли в первой строке, ищем в Content-Type
+                        if (!boundaryMatch) {
+                          const contentTypeMatch = text.match(/Content-Type:\s*multipart\/related[^]*?boundary=["']?([^"'\s;]+)["']?/i)
+                          if (contentTypeMatch) {
+                            boundaryMatch = contentTypeMatch
+                          }
+                        }
+                        
+                        const cssResources = new Map()
+                        const imageResources = new Map()
+                        
+                        if (boundaryMatch) {
+                          const boundary = `--${boundaryMatch[1]}`
+                          // Разделяем на части, но пропускаем первую часть (заголовки MHTML)
+                          const allParts = text.split(boundary)
+                          // Пропускаем первую часть (заголовки MHTML) и последнюю (пустая строка после последнего boundary)
+                          const parts = allParts.slice(1, allParts.length - 1)
+                          
+                          // Собираем все ресурсы (CSS и изображения)
+                          for (const part of parts) {
+                            const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                              ? part.indexOf('\r\n\r\n') + 4
+                              : part.indexOf('\n\n') !== -1
+                              ? part.indexOf('\n\n') + 2
+                              : -1
+                            
+                            if (headerEnd === -1) continue
+                            
+                            const headers = part.substring(0, headerEnd).toLowerCase()
+                            const body = part.substring(headerEnd).trim()
+                            
+                            // Ищем CSS файлы
+                            if (headers.includes('content-type: text/css')) {
+                              const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
+                                                   headers.match(/content-id:\s*<([^>]+)>/i)
+                              const location = locationMatch ? locationMatch[1].trim() : null
+                              
+                              if (location && body.length > 0) {
+                                // Сохраняем CSS контент
+                                cssResources.set(location, body)
+                              }
+                            }
+                            
+                            // Ищем изображения (jpg, png, gif, webp, svg и т.д.)
+                            if (headers.includes('content-type: image/')) {
+                              const contentTypeMatch = headers.match(/content-type:\s*([^\r\n]+)/i)
+                              const contentType = contentTypeMatch ? contentTypeMatch[1].trim().toLowerCase() : 'image/jpeg'
+                              
+                              const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i) || 
+                                                   headers.match(/content-id:\s*<([^>]+)>/i)
+                              const location = locationMatch ? locationMatch[1].trim() : null
+                              
+                              if (location && body.length > 0) {
+                                try {
+                                  // Проверяем Content-Transfer-Encoding
+                                  const encodingMatch = headers.match(/content-transfer-encoding:\s*([^\r\n]+)/i)
+                                  const encoding = encodingMatch ? encodingMatch[1].trim().toLowerCase() : ''
+                                  
+                                  let imageData = body.trim()
+                                  
+                                  // Если изображение уже в формате data URI, используем как есть
+                                  if (imageData.startsWith('data:')) {
+                                    imageResources.set(location, imageData)
+                                    continue
+                                  }
+                                  
+                                  // Если encoding = base64 или изображение выглядит как base64
+                                  if (encoding === 'base64' || /^[A-Za-z0-9+/=\s]+$/.test(imageData)) {
+                                    // Удаляем все пробелы и переносы строк из base64
+                                    const cleanBody = imageData.replace(/[\r\n\s]/g, '')
+                                    imageData = `data:${contentType};base64,${cleanBody}`
+                                  } else {
+                                    // Для бинарных данных в браузере нужно использовать другой подход
+                                    // Но обычно в MHTML изображения уже в base64
+                                    // Пробуем использовать как base64
+                                    const cleanBody = imageData.replace(/[\r\n\s]/g, '')
+                                    if (/^[A-Za-z0-9+/=]+$/.test(cleanBody)) {
+                                      imageData = `data:${contentType};base64,${cleanBody}`
+                                    } else {
+                                      // Если не base64, пропускаем (в браузере сложно работать с бинарными данными)
+                                      continue
+                                    }
+                                  }
+                                  
+                                  // Сохраняем изображение
+                                  imageResources.set(location, imageData)
+                                } catch (e) {
+                                  // Если не удалось обработать изображение, пропускаем его
+                                  continue
+                                }
+                              }
+                            }
+                          }
+                          
+                          // Ищем часть с основным HTML контентом
+                          let foundMainHtml = false
+                          let mainHtmlContent = ''
+                          let maxHtmlLength = 0
+                          let baseUrl = '' // Базовый URL для разрешения относительных путей
+                          
+                          // Сначала ищем HTML с Content-Location (основная страница, не iframe)
+                          for (const part of parts) {
+                            const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                              ? part.indexOf('\r\n\r\n') + 4
+                              : part.indexOf('\n\n') !== -1
+                              ? part.indexOf('\n\n') + 2
+                              : -1
+                            
+                            if (headerEnd === -1) continue
+                            
+                            const headers = part.substring(0, headerEnd).toLowerCase()
+                            let body = part.substring(headerEnd).trim()
+                            
+                            // Удаляем возможные заголовки MHTML из начала body (если они там остались)
+                            // Ищем начало HTML контента - должно начинаться с <!DOCTYPE или <html
+                            const htmlStartIndex = Math.max(
+                              body.indexOf('<!DOCTYPE'),
+                              body.indexOf('<html')
+                            )
+                            
+                            if (htmlStartIndex > 0) {
+                              // Если HTML начинается не с начала body, обрезаем все заголовки перед ним
+                              body = body.substring(htmlStartIndex)
+                            }
+                            
+                            // Ищем HTML блок с Content-Location (основная страница, не iframe)
+                            // Исключаем iframe контент и другие встроенные элементы
+                            if (headers.includes('content-type: text/html') && 
+                                headers.includes('content-location:') &&
+                                (body.includes('<!DOCTYPE') || body.startsWith('<html'))) {
+                              const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i)
+                              const location = locationMatch ? locationMatch[1].trim() : ''
+                              
+                              // Сохраняем базовый URL
+                              if (location && !baseUrl) {
+                                try {
+                                  const urlObj = new URL(location)
+                                  baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1)}`
+                                } catch {
+                                  baseUrl = location.substring(0, location.lastIndexOf('/') + 1)
+                                }
+                              }
+                              
+                              // Пропускаем iframe, embed и другие встроенные элементы
+                              if (location.includes('iframe') || 
+                                  location.includes('embed') || 
+                                  location.includes('frame') ||
+                                  location.includes('widget') ||
+                                  location.includes('popup')) {
+                                continue
+                              }
+                              
+                              // Ищем начало HTML (может быть <!DOCTYPE или <html)
+                              const htmlStart = Math.max(
+                                body.indexOf('<!DOCTYPE'),
+                                body.indexOf('<html')
+                              )
+                              
+                              if (htmlStart !== -1) {
+                                const candidate = body.substring(htmlStart)
+                                const htmlEnd = candidate.indexOf('</html>')
+                                if (htmlEnd !== -1) {
+                                  const htmlBlock = candidate.substring(0, htmlEnd + 7)
+                                  // Берем самый большой HTML блок с Content-Location
+                                  if (htmlBlock.length > maxHtmlLength) {
+                                    mainHtmlContent = htmlBlock
+                                    maxHtmlLength = htmlBlock.length
+                                    foundMainHtml = true
+                                  }
+                                }
+                              }
+                            }
+                          }
+                          
+                          // Если нашли через Content-Location, используем его
+                          if (foundMainHtml && mainHtmlContent.length > 0) {
+                            htmlContent = mainHtmlContent
+                          } else {
+                            // Если не нашли через Content-Location, берем самый большой HTML блок
+                            maxHtmlLength = 0
+                            for (const part of parts) {
+                              const headerEnd = part.indexOf('\r\n\r\n') !== -1 
+                                ? part.indexOf('\r\n\r\n') + 4
+                                : part.indexOf('\n\n') !== -1
+                                ? part.indexOf('\n\n') + 2
+                                : -1
+                              
+                              if (headerEnd === -1) continue
+                              
+                              const headers = part.substring(0, headerEnd).toLowerCase()
+                              let body = part.substring(headerEnd).trim()
+                              
+                              // Удаляем возможные заголовки MHTML из начала body
+                              const htmlStartIndex = Math.max(
+                                body.indexOf('<!DOCTYPE'),
+                                body.indexOf('<html')
+                              )
+                              
+                              if (htmlStartIndex > 0) {
+                                // Если HTML начинается не с начала body, обрезаем все заголовки перед ним
+                                body = body.substring(htmlStartIndex)
+                              }
+                              
+                              // Пропускаем части без HTML или с подозрительными заголовками
+                              if (!headers.includes('content-type: text/html') || 
+                                  (!body.includes('<!DOCTYPE') && !body.startsWith('<html'))) {
+                                continue
+                              }
+                              
+                              // Пропускаем iframe и встроенный контент
+                              if (headers.includes('content-location:')) {
+                                const locationMatch = headers.match(/content-location:\s*([^\r\n]+)/i)
+                                const location = locationMatch ? locationMatch[1].trim().toLowerCase() : ''
+                                if (location.includes('iframe') || 
+                                    location.includes('embed') || 
+                                    location.includes('frame') ||
+                                    location.includes('widget') ||
+                                    location.includes('popup')) {
+                                  continue
+                                }
+                              }
+                              
+                              // Ищем начало HTML (может быть <!DOCTYPE или <html)
+                              const htmlStart = Math.max(
+                                body.indexOf('<!DOCTYPE'),
+                                body.indexOf('<html')
+                              )
+                              
+                              if (htmlStart !== -1) {
+                                const candidate = body.substring(htmlStart)
+                                const htmlEnd = candidate.indexOf('</html>')
+                                if (htmlEnd !== -1) {
+                                  const htmlBlock = candidate.substring(0, htmlEnd + 7)
+                                  // Берем самый большой HTML блок (основной контент)
+                                  if (htmlBlock.length > maxHtmlLength && htmlBlock.length > 1000) {
+                                    mainHtmlContent = htmlBlock
+                                    maxHtmlLength = htmlBlock.length
+                                  }
+                                }
+                              }
+                            }
+                            
+                            if (mainHtmlContent.length > 0) {
+                              htmlContent = mainHtmlContent
+                            }
+                          }
+                          
+                          // Встраиваем CSS стили в HTML
+                          if (htmlContent && cssResources.size > 0) {
+                            // Находим </head> или создаем head если его нет
+                            let headEnd = htmlContent.indexOf('</head>')
+                            if (headEnd === -1) {
+                              // Если нет </head>, добавляем перед </html>
+                              const htmlEnd = htmlContent.indexOf('</html>')
+                              if (htmlEnd !== -1) {
+                                htmlContent = htmlContent.substring(0, htmlEnd) + '</head></html>'
+                                headEnd = htmlContent.indexOf('</head>')
+                              }
+                            }
+                            
+                            if (headEnd !== -1) {
+                              // Создаем блок со стилями
+                              let stylesBlock = ''
+                              cssResources.forEach((cssContent, location) => {
+                                stylesBlock += `<style data-source="${location}">\n${cssContent}\n</style>\n`
+                              })
+                              
+                              // Вставляем стили перед </head>
+                              htmlContent = htmlContent.substring(0, headEnd) + stylesBlock + htmlContent.substring(headEnd)
+                            }
+                            
+                            // Заменяем ссылки на cid: CSS файлы на встроенные стили
+                            cssResources.forEach((cssContent, location) => {
+                              // Заменяем cid: ссылки в href
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`<link[^>]*href=["']cid:${location.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`, 'gi'),
+                                ''
+                              )
+                            })
+                          }
+                          
+                          // Функция для разрешения относительных URL
+                          const resolveUrl = (url: string, base: string): string => {
+                            if (!url) return url
+                            
+                            // Если уже абсолютный URL
+                            if (url.startsWith('http://') || url.startsWith('https://')) {
+                              return url
+                            }
+                            
+                            // Если протокол-относительный URL (//example.com/image.jpg)
+                            if (url.startsWith('//')) {
+                              try {
+                                const baseUrl = new URL(base || 'http://example.com')
+                                return `${baseUrl.protocol}${url}`
+                              } catch {
+                                return `https:${url}`
+                              }
+                            }
+                            
+                            // Если абсолютный путь (/image.jpg)
+                            if (url.startsWith('/')) {
+                              try {
+                                const baseUrl = new URL(base || 'http://example.com')
+                                return `${baseUrl.protocol}//${baseUrl.host}${url}`
+                              } catch {
+                                return url
+                              }
+                            }
+                            
+                            // Относительный путь (image.jpg или ../image.jpg)
+                            try {
+                              const baseUrl = new URL(base || 'http://example.com')
+                              return new URL(url, baseUrl).toString()
+                            } catch {
+                              return url
+                            }
+                          }
+                          
+                          // Функция для нормализации URL (для сравнения)
+                          const normalizeUrlForMatch = (url: string): string => {
+                            if (!url) return ''
+                            try {
+                              const urlObj = new URL(url, baseUrl || 'http://example.com')
+                              // Убираем протокол, домен, query и hash для сравнения
+                              return urlObj.pathname.toLowerCase()
+                            } catch {
+                              // Если не URL, возвращаем путь без query и hash
+                              return url.split('?')[0].split('#')[0].toLowerCase()
+                            }
+                          }
+                          
+                          // Заменяем ссылки на изображения из MHTML на встроенные data URIs
+                          if (htmlContent && imageResources.size > 0) {
+                            // Создаем карту нормализованных путей для быстрого поиска
+                            const imageMap = new Map<string, string>()
+                            imageResources.forEach((imageData, location) => {
+                              // Сохраняем оригинальный путь (в разных вариантах регистра)
+                              imageMap.set(location.toLowerCase(), imageData)
+                              imageMap.set(location, imageData)
+                              
+                              // Сохраняем нормализованный путь
+                              const normalized = normalizeUrlForMatch(location)
+                              if (normalized) {
+                                imageMap.set(normalized, imageData)
+                                // Также сохраняем с ведущим слешем
+                                if (!normalized.startsWith('/')) {
+                                  imageMap.set(`/${normalized}`, imageData)
+                                }
+                              }
+                              
+                              // Сохраняем только имя файла
+                              const fileName = location.split('/').pop()?.split('?')[0]?.toLowerCase()
+                              if (fileName && fileName.includes('.')) {
+                                imageMap.set(fileName, imageData)
+                                // Также с разными вариантами пути
+                                imageMap.set(`./${fileName}`, imageData)
+                                imageMap.set(`../${fileName}`, imageData)
+                              }
+                              
+                              // Если есть baseUrl, разрешаем относительные пути
+                              if (baseUrl) {
+                                try {
+                                  const resolved = resolveUrl(location, baseUrl)
+                                  if (resolved !== location) {
+                                    imageMap.set(resolved.toLowerCase(), imageData)
+                                    const resolvedNormalized = normalizeUrlForMatch(resolved)
+                                    if (resolvedNormalized) {
+                                      imageMap.set(resolvedNormalized, imageData)
+                                    }
+                                  }
+                                } catch (e) {
+                                  // Игнорируем ошибки разрешения URL
+                                }
+                              }
+                            })
+                            
+                            // Заменяем все ссылки на изображения
+                            imageMap.forEach((imageData, searchKey) => {
+                              // Экранируем для regex
+                              const escaped = searchKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                              
+                              // Заменяем в src атрибутах
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(src=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  // Проверяем, что это действительно изображение
+                                  if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                      url.includes('image') || 
+                                      url.match(/data:image/i)) {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                  return match
+                                }
+                              )
+                              
+                              // Заменяем в srcset
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(srcset=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  // Проверяем, что это действительно изображение
+                                  if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                      url.includes('image')) {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                  return match
+                                }
+                              )
+                              
+                              // Заменяем в data-src (lazy loading)
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(data-src=["'])([^"']*${escaped}[^"']*)(["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  // Проверяем, что это действительно изображение
+                                  if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                      url.includes('image')) {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                  return match
+                                }
+                              )
+                              
+                              // Заменяем cid: ссылки
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`cid:${escaped}`, 'gi'),
+                                imageData
+                              )
+                              
+                              // Заменяем в inline стилях (style="background-image: url(...)")
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(style=["'][^"']*background-image:\\s*url\\(["']?)([^"')]*${escaped}[^"')]*)(["']?\\)[^"']*["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  return `${prefix}${imageData}${suffix}`
+                                }
+                              )
+                              
+                              // Также заменяем в других CSS свойствах со ссылками на изображения
+                              htmlContent = htmlContent.replace(
+                                new RegExp(`(style=["'][^"']*:\\s*url\\(["']?)([^"')]*${escaped}[^"')]*)(["']?\\)[^"']*["'])`, 'gi'),
+                                (match, prefix, url, suffix) => {
+                                  // Проверяем, что это изображение
+                                  if (url.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|#|$)/i) || 
+                                      url.includes('image')) {
+                                    return `${prefix}${imageData}${suffix}`
+                                  }
+                                  return match
+                                }
+                              )
+                            })
+                            
+                            // Также обрабатываем пути в CSS
+                            const updatedCssResources = new Map<string, string>()
+                            cssResources.forEach((cssContent, cssLocation) => {
+                              let updatedCss = cssContent
+                              
+                              // Обрабатываем все возможные варианты путей к изображениям
+                              imageMap.forEach((imageData, searchKey) => {
+                                const escaped = searchKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                
+                                // Заменяем в CSS url() с разными вариантами кавычек и без них
+                                updatedCss = updatedCss.replace(
+                                  new RegExp(`url\\(["']?[^"')]*${escaped}[^"')]*["']?\\)`, 'gi'),
+                                  `url(${imageData})`
+                                )
+                                
+                                // Также заменяем относительные пути, разрешая их через baseUrl
+                                if (baseUrl) {
+                                  const resolvedUrl = resolveUrl(searchKey, baseUrl)
+                                  if (resolvedUrl !== searchKey) {
+                                    const resolvedEscaped = resolvedUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                                    updatedCss = updatedCss.replace(
+                                      new RegExp(`url\\(["']?[^"')]*${resolvedEscaped}[^"')]*["']?\\)`, 'gi'),
+                                      `url(${imageData})`
+                                    )
+                                  }
+                                }
+                              })
+                              
+                              updatedCssResources.set(cssLocation, updatedCss)
+                            })
+                            
+                            // Обновляем CSS ресурсы
+                            cssResources.clear()
+                            updatedCssResources.forEach((content, location) => {
+                              cssResources.set(location, content)
+                            })
+                            
+                            // Обновляем CSS в HTML после замены изображений
+                            if (cssResources.size > 0) {
+                              let headEnd = htmlContent.indexOf('</head>')
+                              if (headEnd !== -1) {
+                                // Находим существующие style теги и обновляем их
+                                const styleRegex = /<style[^>]*data-source=["']([^"']+)["'][^>]*>([\s\S]*?)<\/style>/gi
+                                htmlContent = htmlContent.replace(styleRegex, (match, source, content) => {
+                                  const updatedContent = cssResources.get(source) || content
+                                  return `<style data-source="${source}">\n${updatedContent}\n</style>`
+                                })
+                              }
+                            }
+                          }
+                        } else {
+                          // Fallback: прямой поиск HTML
+                          const htmlMatch = text.match(/<!DOCTYPE[\s\S]*?<\/html>/i)
+                          if (htmlMatch) {
+                            htmlContent = htmlMatch[0]
+                          }
+                        }
+                        
+                        // Проверяем, что HTML контент был найден
+                        if (!htmlContent || htmlContent.trim().length === 0) {
+                          throw new Error('Failed to extract HTML content from MHTML file')
+                        }
+                        
+                        // Финальная обрезка - строго по первому </html>
+                        const finalHtmlEnd = htmlContent.indexOf('</html>')
+                        if (finalHtmlEnd !== -1) {
+                          htmlContent = htmlContent.substring(0, finalHtmlEnd + 7)
+                        }
+                      }
+                      
+                      // Финальная очистка HTML контента
+                      htmlContent = htmlContent.trim()
+                      
+                      // Проверяем, что после очистки контент не пустой
+                      if (!htmlContent || htmlContent.length === 0) {
+                        throw new Error('HTML content is empty after processing')
+                      }
+                      
+                      // Удаляем заголовки MHTML, если они попали в начало HTML (From, Subject, Date и т.д.)
+                      const mhtmlHeadersPattern = /^(From:|Snapshot-Content-Location:|Subject:|Date:|MIME-Version:|Content-Type:|boundary=)[^\n]*\n?/gmi
+                      htmlContent = htmlContent.replace(mhtmlHeadersPattern, '')
+                      
+                      // Ищем начало HTML контента после удаления заголовков
+                      const finalHtmlStart = Math.max(
+                        htmlContent.indexOf('<!DOCTYPE'),
+                        htmlContent.indexOf('<html')
+                      )
+                      
+                      if (finalHtmlStart > 0) {
+                        // Если HTML начинается не с начала, обрезаем все перед ним
+                        htmlContent = htmlContent.substring(finalHtmlStart)
+                      }
+                      
+                      // Строго обрезаем по первому </html> - это гарантирует, что мы не захватим
+                      // дополнительные HTML блоки из других частей MHTML (например, iframe контент)
+                      const strictHtmlEnd = htmlContent.indexOf('</html>')
+                      if (strictHtmlEnd !== -1) {
+                        htmlContent = htmlContent.substring(0, strictHtmlEnd + 7)
+                      }
+                      
+                      // Удаляем все скрипты, которые могут добавлять элементы на страницу
+                      htmlContent = htmlContent.replace(/<script[\s\S]*?<\/script>/gi, '')
+                      
+                      // Проверяем структуру HTML - должно быть: <!DOCTYPE>...<html>...<body>...</body></html>
+                      // Убеждаемся, что после </body> идет только </html>, без лишнего контента
+                      const bodyEndIndex = htmlContent.lastIndexOf('</body>')
+                      const htmlEndIndex = htmlContent.lastIndexOf('</html>')
+                      
+                      if (bodyEndIndex !== -1 && htmlEndIndex !== -1 && htmlEndIndex > bodyEndIndex) {
+                        // Проверяем, что между </body> и </html> нет лишнего контента
+                        const betweenTags = htmlContent.substring(bodyEndIndex + 7, htmlEndIndex).trim()
+                        if (betweenTags.length > 0 && !betweenTags.match(/^[\s\n\r]*$/)) {
+                          // Есть лишний контент между тегами, удаляем его
+                          htmlContent = htmlContent.substring(0, bodyEndIndex + 7) + '\n</html>'
+                        }
+                      }
+                      
+                      // Валидация HTML контента перед созданием blob
+                      if (!htmlContent || htmlContent.trim().length === 0) {
+                        throw new Error('HTML content is empty')
+                      }
+                      
+                      // Проверяем, что HTML начинается с <!DOCTYPE или <html
+                      if (!htmlContent.includes('<!DOCTYPE') && !htmlContent.includes('<html')) {
+                        throw new Error('Invalid HTML content: missing DOCTYPE or html tag')
+                      }
+                      
+                      // Убеждаемся, что HTML имеет закрывающий тег </html>
+                      if (!htmlContent.includes('</html>')) {
+                        htmlContent += '\n</html>'
+                      }
+                      
+                      // Убеждаемся, что есть тег <body>
+                      if (!htmlContent.includes('<body')) {
+                        const htmlTagIndex = htmlContent.indexOf('<html')
+                        if (htmlTagIndex !== -1) {
+                          const htmlTagEnd = htmlContent.indexOf('>', htmlTagIndex)
+                          if (htmlTagEnd !== -1) {
+                            htmlContent = htmlContent.substring(0, htmlTagEnd + 1) + '\n<body>\n' + 
+                                         htmlContent.substring(htmlTagEnd + 1)
+                            // Добавляем закрывающий тег </body> перед </html>
+                            const htmlEndIndex = htmlContent.lastIndexOf('</html>')
+                            if (htmlEndIndex !== -1) {
+                              htmlContent = htmlContent.substring(0, htmlEndIndex) + '\n</body>\n' + 
+                                           htmlContent.substring(htmlEndIndex)
+                            }
+                          }
+                        }
+                      }
+                      
+                      // Создаем blob из HTML контента
+                      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
+                      
+                      // Проверяем размер blob
+                      if (blob.size === 0) {
+                        throw new Error('Blob size is zero')
+                      }
+                      
+                      // Создаем blob URL
+                      const blobUrl = URL.createObjectURL(blob)
+                      
+                      // Проверяем, что blob URL создан успешно
+                      if (!blobUrl || blobUrl.length === 0) {
+                        throw new Error('Failed to create blob URL')
+                      }
+                      
+                      // Открываем в новой вкладке
+                      const newWindow = window.open(blobUrl, '_blank')
+                      
+                      if (!newWindow) {
+                        URL.revokeObjectURL(blobUrl)
+                        alert('Please allow popups to preview the page')
+                      } else {
+                        // Даем время окну загрузиться перед возможной очисткой
+                        // Blob URL будет автоматически очищен браузером при закрытии вкладки
+                        // Но мы можем сохранить ссылку на blobUrl в window для отладки
+                        if (typeof window !== 'undefined') {
+                          (window as any).lastBlobUrl = blobUrl
+                        }
+                      }
+                    } catch (error) {
+                      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+                      alert(`Failed to load page preview: ${errorMessage}`)
+                    } finally {
+                      // Восстанавливаем кнопку в случае ошибки
+                      const button = e.currentTarget
+                      if (button) {
+                        button.disabled = false
+                        button.textContent = 'Preview Page'
+                      }
+                    }
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
+                >
+                  Preview Page
+                </button>
+              )}
+              {selectedCreative.source_link && (
+                <a
+                  href={selectedCreative.source_link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary btn-full"
+                >
+                  Link
+                </a>
+              )}
+              <button
+                onClick={() => openEditModal(selectedCreative)}
+                className="btn btn-success btn-full"
+              >
+                <EditIcon />
+                <span>Edit</span>
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  deleteSingleCreative(selectedCreative.id, selectedCreative.title)
+                }}
+                className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded transition-colors"
+              >
+                <TrashIcon />
+                <span>Delete</span>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Left Column - Information */}
+                <div>
+                  <h3 className="text-lg font-semibold text-white mb-4">Information</h3>
+                  
+                  {/* Title */}
+                  <div className="mb-4 pb-4 border-b border-gray-700">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-sm text-gray-400">Title</div>
+                      {editingField !== 'title' && (
+                        <button
+                          onClick={() => startEditField('title', selectedCreative.title || '')}
+                          className="p-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+                          title="Редактировать заголовок"
+                        >
+                          <EditIcon />
+                        </button>
+                      )}
+                    </div>
+                    {editingField === 'title' ? (
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={fieldEditValue}
+                          onChange={(e) => setFieldEditValue(e.target.value)}
+                          className="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => saveFieldEdit('title')}
+                          className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded transition-colors"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          onClick={cancelEditField}
+                          className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded transition-colors"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                    <div className="text-base text-white font-medium">
+                      {selectedCreative.title || '-'}
+                    </div>
+                    )}
+                  </div>
+
+                  {/* Description */}
+                    <div className="mb-4 pb-4 border-b border-gray-700">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-sm text-gray-400">Description</div>
+                      {editingField !== 'description' && (
+                        <button
+                          onClick={() => startEditField('description', selectedCreative.description || '')}
+                          className="p-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+                          title="Редактировать описание"
+                        >
+                          <EditIcon />
+                        </button>
+                      )}
+                      </div>
+                    {editingField === 'description' ? (
+                      <div className="flex gap-2">
+                        <textarea
+                          value={fieldEditValue}
+                          onChange={(e) => setFieldEditValue(e.target.value)}
+                          className="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          rows={3}
+                          autoFocus
+                        />
+                        <div className="flex flex-col gap-2">
+                          <button
+                            onClick={() => saveFieldEdit('description')}
+                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded transition-colors"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={cancelEditField}
+                            className="px-3 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded transition-colors"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-base text-gray-300">
+                        {selectedCreative.description || '-'}
+                    </div>
+                  )}
+                  </div>
+
+                  {/* Metadata */}
+                  <div className="space-y-3">
+                    {/* Format */}
+                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                      <span className="text-sm text-gray-400">Format:</span>
+                      <div className="flex items-center gap-2">
+                        {editingField === 'format' ? (
+                          <div className="flex gap-2">
+                            <select
+                              value={fieldEditValue}
+                              onChange={(e) => setFieldEditValue(e.target.value)}
+                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              autoFocus
+                            >
+                              <option value="">-</option>
+                              {formats.map(f => (
+                                <option key={f.code} value={f.code}>{f.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => saveFieldEdit('format')}
+                              className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              onClick={cancelEditField}
+                              className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.formats?.name || '-'}
+                      </span>
+                            <button
+                              onClick={() => startEditField('format', selectedCreative.formats?.code || '')}
+                              className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+                              title="Редактировать формат"
+                            >
+                              <EditIcon />
+                            </button>
+                          </>
+                        )}
+                    </div>
+                    </div>
+                    {/* Type */}
+                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                      <span className="text-sm text-gray-400">Type:</span>
+                      <div className="flex items-center gap-2">
+                        {editingField === 'type' ? (
+                          <div className="flex gap-2">
+                            <select
+                              value={fieldEditValue}
+                              onChange={(e) => setFieldEditValue(e.target.value)}
+                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              autoFocus
+                            >
+                              <option value="">-</option>
+                              {types.map(t => (
+                                <option key={t.code} value={t.code}>{t.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => saveFieldEdit('type')}
+                              className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              onClick={cancelEditField}
+                              className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.types?.name || '-'}
+                      </span>
+                            <button
+                              onClick={() => startEditField('type', selectedCreative.types?.code || '')}
+                              className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+                              title="Редактировать тип"
+                            >
+                              <EditIcon />
+                            </button>
+                          </>
+                        )}
+                    </div>
+                    </div>
+                    {/* Placement */}
+                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                      <span className="text-sm text-gray-400">Placement:</span>
+                      <div className="flex items-center gap-2">
+                        {editingField === 'placement' ? (
+                          <div className="flex gap-2">
+                            <select
+                              value={fieldEditValue}
+                              onChange={(e) => setFieldEditValue(e.target.value)}
+                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              autoFocus
+                            >
+                              <option value="">-</option>
+                              {placements.map(p => (
+                                <option key={p.code} value={p.code}>{p.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => saveFieldEdit('placement')}
+                              className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              onClick={cancelEditField}
+                              className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.placements?.name || '-'}
+                      </span>
+                            <button
+                              onClick={() => startEditField('placement', selectedCreative.placements?.code || '')}
+                              className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+                              title="Редактировать размещение"
+                            >
+                              <EditIcon />
+                            </button>
+                          </>
+                        )}
+                    </div>
+                    </div>
+                    {/* Country */}
+                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                      <span className="text-sm text-gray-400">Country:</span>
+                      <div className="flex items-center gap-2">
+                        {editingField === 'country' ? (
+                          <div className="flex gap-2">
+                            <select
+                              value={fieldEditValue}
+                              onChange={(e) => setFieldEditValue(e.target.value)}
+                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              autoFocus
+                            >
+                              <option value="">-</option>
+                              {countries.map(c => (
+                                <option key={c.code} value={c.code}>{c.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => saveFieldEdit('country')}
+                              className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              onClick={cancelEditField}
+                              className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.countries?.name || '-'}
+                      </span>
+                            <button
+                              onClick={() => startEditField('country', selectedCreative.country_code || '')}
+                              className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+                              title="Редактировать страну"
+                            >
+                              <EditIcon />
+                            </button>
+                          </>
+                        )}
+                    </div>
+                    </div>
+                    {/* Platform */}
+                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                      <span className="text-sm text-gray-400">Platform:</span>
+                      <div className="flex items-center gap-2">
+                        {editingField === 'platform' ? (
+                          <div className="flex gap-2">
+                            <select
+                              value={fieldEditValue}
+                              onChange={(e) => setFieldEditValue(e.target.value)}
+                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              autoFocus
+                            >
+                              <option value="">-</option>
+                              {platforms.map(p => (
+                                <option key={p.code} value={p.code}>{p.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => saveFieldEdit('platform')}
+                              className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              onClick={cancelEditField}
+                              className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.platforms?.name || '-'}
+                      </span>
+                            <button
+                              onClick={() => startEditField('platform', selectedCreative.platforms?.code || '')}
+                              className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+                              title="Редактировать платформу"
+                            >
+                              <EditIcon />
+                            </button>
+                          </>
+                        )}
+                    </div>
+                    </div>
+                    {/* Cloaking */}
+                    <div className="flex justify-between items-center py-2 border-b border-gray-700">
+                      <span className="text-sm text-gray-400">Cloaking:</span>
+                      <div className="flex items-center gap-2">
+                        {editingField === 'cloaking' ? (
+                          <div className="flex gap-2">
+                            <select
+                              value={fieldEditValue}
+                              onChange={(e) => setFieldEditValue(e.target.value)}
+                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              autoFocus
+                            >
+                              <option value="false">No</option>
+                              <option value="true">Yes</option>
+                            </select>
+                            <button
+                              onClick={() => saveFieldEdit('cloaking')}
+                              className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              onClick={cancelEditField}
+                              className="px-2 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                      <span className={`text-sm font-medium ${
+                        selectedCreative.cloaking ? 'text-red-400' : 'text-green-400'
+                      }`}>
+                        {selectedCreative.cloaking ? 'Yes' : 'No'}
+                      </span>
+                            <button
+                              onClick={() => startEditField('cloaking', String(selectedCreative.cloaking))}
+                              className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+                              title="Редактировать cloaking"
+                            >
+                              <EditIcon />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center py-2">
+                      <span className="text-sm text-gray-400">Captured:</span>
+                      <span className="text-sm text-gray-300">
+                        {new Date(selectedCreative.captured_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column - Media */}
+                <div>
+                  {selectedCreative.media_url ? (
+                    <div className="w-full">
+                      <img
+                        src={selectedCreative.media_url}
+                        alt={selectedCreative.title || 'Creative'}
+                        className="w-full h-auto rounded-lg border border-gray-700 shadow-sm"
+                      />
+                    </div>
+                  ) : (
+                    <div className="aspect-video bg-gray-800 flex items-center justify-center rounded-lg border border-gray-700">
+                      <div className="text-center text-gray-400">
+                        <div className="text-4xl mb-2">📄</div>
+                        <p>No Preview Available</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -3057,6 +4922,312 @@ export default function AdminPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Dashboard Settings Tab */}
+      {activeTab === 'dashboard' && (
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
+          <div className="bg-gray-900 rounded-lg p-4 sm:p-6">
+            <h2 className="text-xl sm:text-2xl font-bold text-white mb-6">⚙️ Настройка дашборда</h2>
+
+            <div className="space-y-6">
+              {/* Display Settings */}
+              <div className="bg-gray-800 rounded-lg p-4 sm:p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Настройки отображения</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Количество элементов на странице
+                    </label>
+                    <select
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      defaultValue="20"
+                    >
+                      <option value="10">10</option>
+                      <option value="20">20</option>
+                      <option value="30">30</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">Количество креативов, отображаемых на одной странице</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Сортировка по умолчанию
+                    </label>
+                    <select
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      defaultValue="newest"
+                    >
+                      <option value="newest">Сначала новые</option>
+                      <option value="oldest">Сначала старые</option>
+                      <option value="title_asc">По названию (А-Я)</option>
+                      <option value="title_desc">По названию (Я-А)</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="showThumbnails"
+                      defaultChecked
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="showThumbnails" className="text-sm text-gray-300">
+                      Показывать миниатюры изображений
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="showDescriptions"
+                      defaultChecked
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="showDescriptions" className="text-sm text-gray-300">
+                      Показывать описания креативов
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter Visibility Settings */}
+              <div className="bg-gray-800 rounded-lg p-4 sm:p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Видимость фильтров</h3>
+                <p className="text-sm text-gray-400 mb-4">Выберите, какие фильтры отображать в дашборде</p>
+                
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showDateFilter"
+                        checked={dashboardFilterSettings.date}
+                        disabled
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500 opacity-50 cursor-not-allowed"
+                      />
+                      <label htmlFor="showDateFilter" className="text-sm font-medium text-white">
+                        Date (Дата)
+                      </label>
+                    </div>
+                    <span className="text-xs text-gray-400">Обязательный</span>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showFormatFilter"
+                        checked={dashboardFilterSettings.format}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('format', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showFormatFilter" className="text-sm font-medium text-white">
+                        Format (Формат)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showTypeFilter"
+                        checked={dashboardFilterSettings.type}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('type', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showTypeFilter" className="text-sm font-medium text-white">
+                        Type (Тип)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showPlacementFilter"
+                        checked={dashboardFilterSettings.placement}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('placement', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showPlacementFilter" className="text-sm font-medium text-white">
+                        Placement (Размещение)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showCountryFilter"
+                        checked={dashboardFilterSettings.country}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('country', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showCountryFilter" className="text-sm font-medium text-white">
+                        Country (Страна)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showPlatformFilter"
+                        checked={dashboardFilterSettings.platform}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('platform', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showPlatformFilter" className="text-sm font-medium text-white">
+                        Platform (Платформа)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showCloakingFilter"
+                        checked={dashboardFilterSettings.cloaking}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('cloaking', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showCloakingFilter" className="text-sm font-medium text-white">
+                        Cloaking (Клоакинг)
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter Settings */}
+              <div className="bg-gray-800 rounded-lg p-4 sm:p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Настройки фильтров</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Период по умолчанию
+                    </label>
+                    <select
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      defaultValue="all"
+                    >
+                      <option value="all">Все время</option>
+                      <option value="today">Сегодня</option>
+                      <option value="week">Последние 7 дней</option>
+                      <option value="month">Последние 30 дней</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Advanced Settings */}
+              <div className="bg-gray-800 rounded-lg p-4 sm:p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Дополнительные настройки</h3>
+                
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="enableAutoRefresh"
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="enableAutoRefresh" className="text-sm text-gray-300">
+                      Автоматическое обновление данных
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Интервал автообновления (секунды)
+                    </label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="300"
+                      step="10"
+                      defaultValue="60"
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="enableNotifications"
+                      defaultChecked
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="enableNotifications" className="text-sm text-gray-300">
+                      Показывать уведомления о новых креативах
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="flex justify-end gap-4 pt-4 border-t border-gray-700">
+                <button
+                  onClick={() => setActiveTab('list')}
+                  className="btn btn-secondary"
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      // Сохраняем все текущие настройки через API
+                      const response = await fetch('/api/dashboard-settings', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                          key: 'filters',
+                          value: dashboardFilterSettings
+                        })
+                      })
+                      
+                      if (response.ok) {
+                        alert('Настройки успешно сохранены! Изменения применятся на всех устройствах.')
+                        window.dispatchEvent(new Event('dashboardSettingsChanged'))
+                      } else {
+                        throw new Error('Failed to save')
+                      }
+                    } catch (e) {
+                      console.error('Error saving settings:', e)
+                      alert('Ошибка при сохранении настроек. Попробуйте еще раз.')
+                    }
+                  }}
+                  className="btn btn-primary"
+                >
+                  Сохранить настройки
+                </button>
+              </div>
+            </div>
+          </div>
+        </main>
       )}
     </div>
   )

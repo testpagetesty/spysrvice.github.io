@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { X, Download, ExternalLink, Play } from 'lucide-react'
 import { type CreativeWithRelations } from '@/lib/supabase'
@@ -14,8 +14,31 @@ interface CreativeModalProps {
 
 export default function CreativeModal({ creative, isOpen, onClose }: CreativeModalProps) {
   const [imageError, setImageError] = useState(false)
+  const [isAnimating, setIsAnimating] = useState(false)
+  const [shouldRender, setShouldRender] = useState(false)
 
-  if (!isOpen || !creative) return null
+  // Управление анимацией открытия
+  useEffect(() => {
+    if (isOpen && creative) {
+      setShouldRender(true)
+      // Небольшая задержка для запуска анимации после монтирования
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setIsAnimating(true)
+        })
+      })
+    } else if (!isOpen) {
+      // Анимация закрытия
+      setIsAnimating(false)
+      // Ждем завершения анимации перед удалением из DOM
+      const timer = setTimeout(() => {
+        setShouldRender(false)
+      }, 200) // 200ms - время анимации
+      return () => clearTimeout(timer)
+    }
+  }, [isOpen, creative])
+
+  if (!shouldRender || !creative) return null
 
   const mediaUrl = getMediaUrl(creative.media_url)
   const isVideo = creative.formats?.code === 'video'
@@ -28,26 +51,32 @@ export default function CreativeModal({ creative, isOpen, onClose }: CreativeMod
 
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
+      className={`fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-opacity duration-200 ${
+        isAnimating ? 'opacity-100' : 'opacity-0'
+      }`}
       onClick={handleBackdropClick}
     >
-      <div className="bg-gray-900 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden">
+      <div 
+        className={`bg-gray-900 rounded-xl max-w-6xl w-full max-h-[90vh] overflow-hidden shadow-2xl border border-gray-800/50 transition-all duration-200 ${
+          isAnimating ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+        }`}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-800">
+        <div className="flex items-center justify-between p-6 border-b border-gray-800/50">
           <h2 className="text-xl font-semibold text-white">
             {creative.title || 'Creative Details'}
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white transition-colors"
+            className="btn-ghost btn-sm rounded-full p-2 hover:bg-gray-800"
           >
-            <X className="w-6 h-6" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="flex flex-col lg:flex-row">
           {/* Left Column - Information */}
-          <div className="lg:w-1/2 p-6 border-r border-gray-800">
+          <div className="lg:w-[55%] p-6 border-r border-gray-800">
             <div className="space-y-6">
               {/* Information Section */}
               <div>
@@ -116,9 +145,8 @@ export default function CreativeModal({ creative, isOpen, onClose }: CreativeMod
                     href={creative.download_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                    className="btn btn-primary btn-full py-3"
                   >
-                    <Download className="w-4 h-4" />
                     Download Archive
                   </a>
                 )}
@@ -126,9 +154,8 @@ export default function CreativeModal({ creative, isOpen, onClose }: CreativeMod
                 {creative.source_link && (
                   <button
                     onClick={() => window.open(creative.source_link, '_blank')}
-                    className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                    className="btn btn-secondary btn-full py-3"
                   >
-                    <ExternalLink className="w-4 h-4" />
                     Link
                   </button>
                 )}
@@ -137,8 +164,8 @@ export default function CreativeModal({ creative, isOpen, onClose }: CreativeMod
           </div>
 
           {/* Right Column - Media */}
-          <div className="lg:w-1/2 p-6">
-            <div className="aspect-video bg-gray-800 rounded-lg overflow-hidden relative">
+          <div className="lg:w-[45%] p-6">
+            <div className="aspect-video bg-gray-800 rounded-lg overflow-hidden relative max-w-lg mx-auto">
               {!imageError && mediaUrl ? (
                 <>
                   <Image
@@ -152,9 +179,9 @@ export default function CreativeModal({ creative, isOpen, onClose }: CreativeMod
                   
                   {/* Video Play Button */}
                   {isVideo && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-30">
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                       <button 
-                        className="bg-black bg-opacity-70 rounded-full p-4 hover:scale-110 transition-transform"
+                        className="bg-black/80 backdrop-blur-sm rounded-full p-5 hover:scale-110 hover:bg-black/90 transition-all duration-200 shadow-xl"
                         onClick={() => mediaUrl && window.open(mediaUrl, '_blank')}
                       >
                         <Play className="w-8 h-8 text-white fill-white" />
