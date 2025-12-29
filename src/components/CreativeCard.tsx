@@ -135,26 +135,24 @@ export default function CreativeCard({ creative, onClick }: CreativeCardProps) {
         <div className="flex gap-2 mt-4 opacity-0 group-hover:opacity-100 transition-opacity">
           {creative.download_url && (
             <button 
-              className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-xs py-2 px-3 rounded flex items-center justify-center gap-1 transition-colors"
+              className="btn btn-secondary btn-sm flex-1"
               onClick={(e) => {
                 e.stopPropagation()
                 window.open(creative.download_url, '_blank')
               }}
             >
-              <Download className="w-3 h-3" />
               Download
             </button>
           )}
           
           {creative.source_link && (
             <button 
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 px-3 rounded flex items-center justify-center gap-1 transition-colors"
+              className="btn btn-primary btn-sm flex-1"
               onClick={(e) => {
                 e.stopPropagation()
                 window.open(creative.source_link, '_blank')
               }}
             >
-              <ExternalLink className="w-3 h-3" />
               Link
             </button>
           )}

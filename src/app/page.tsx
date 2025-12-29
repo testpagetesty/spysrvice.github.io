@@ -135,6 +135,14 @@ export default function HomePage() {
   const [cropStart, setCropStart] = useState({ x: 0, y: 0 })
   const [cropEnd, setCropEnd] = useState({ x: 0, y: 0 })
   const [isCropping, setIsCropping] = useState(false)
+  
+  // Состояния для анимаций модалок
+  const [modalAnimating, setModalAnimating] = useState(false)
+  const [modalRender, setModalRender] = useState(false)
+  const [fullScreenshotAnimating, setFullScreenshotAnimating] = useState(false)
+  const [fullScreenshotRender, setFullScreenshotRender] = useState(false)
+  const [cropModalAnimating, setCropModalAnimating] = useState(false)
+  const [cropModalRender, setCropModalRender] = useState(false)
   const [cropImageRef, setCropImageRef] = useState<HTMLImageElement | null>(null)
   const dateDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -151,6 +159,54 @@ export default function HomePage() {
       document.body.style.overflow = ''
     }
   }, [showModal, showFullScreenshot, showCropModal])
+
+  // Анимация основной модалки
+  useEffect(() => {
+    if (showModal && selectedCreative) {
+      setModalRender(true)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setModalAnimating(true)
+        })
+      })
+    } else if (!showModal) {
+      setModalAnimating(false)
+      const timer = setTimeout(() => setModalRender(false), 200)
+      return () => clearTimeout(timer)
+    }
+  }, [showModal, selectedCreative])
+
+  // Анимация модалки полного скриншота
+  useEffect(() => {
+    if (showFullScreenshot) {
+      setFullScreenshotRender(true)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setFullScreenshotAnimating(true)
+        })
+      })
+    } else {
+      setFullScreenshotAnimating(false)
+      const timer = setTimeout(() => setFullScreenshotRender(false), 200)
+      return () => clearTimeout(timer)
+    }
+  }, [showFullScreenshot])
+
+  // Анимация модалки обрезки
+  useEffect(() => {
+    if (showCropModal && cropImage) {
+      setCropModalRender(true)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setCropModalAnimating(true)
+        })
+      })
+    } else if (!showCropModal) {
+      setCropModalAnimating(false)
+      const timer = setTimeout(() => setCropModalRender(false), 200)
+      return () => clearTimeout(timer)
+    }
+  }, [showCropModal, cropImage])
 
   const dateFromRef = useRef<DateInputWithPicker | null>(null)
   const dateToRef = useRef<DateInputWithPicker | null>(null)
@@ -712,21 +768,19 @@ export default function HomePage() {
             <div className="flex items-center justify-center sm:justify-end space-x-2 sm:space-x-4">
               <button
                 onClick={toggleTheme}
-                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                className="btn btn-ghost"
                 title={isLightTheme ? 'Switch to dark theme' : 'Switch to light theme'}
               >
-                <span>{isLightTheme ? '🌙' : '☀️'}</span>
-                <span>{isLightTheme ? 'Dark' : 'Light'}</span>
+                {isLightTheme ? 'Dark' : 'Light'}
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                className="btn btn-ghost"
                 title="Refresh page"
               >
-                <span>🔄</span>
-                <span>Refresh</span>
+                Refresh
               </button>
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+              <button className="btn btn-primary">
                 Sign in
               </button>
             </div>
@@ -805,7 +859,7 @@ export default function HomePage() {
                       </button>
                       <button
                         onClick={() => setShowDateDropdown(false)}
-                        className="flex-1 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                        className="btn btn-primary btn-sm"
                       >
                         Apply
                       </button>
@@ -924,7 +978,7 @@ export default function HomePage() {
                   })
                   loadDataWithFilters(1)
                 }}
-                className="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                className="btn btn-secondary flex-1"
               >
                 Reset
               </button>
@@ -933,7 +987,7 @@ export default function HomePage() {
                   setCurrentPage(1)
                   applyFilters()
                 }}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                className="btn btn-primary flex-1"
               >
                 Apply
               </button>
@@ -1108,13 +1162,17 @@ export default function HomePage() {
       </main>
 
       {/* Modal */}
-      {showModal && selectedCreative && (
+      {modalRender && selectedCreative && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4"
+          className={`fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-opacity duration-200 ${
+            modalAnimating ? 'opacity-100' : 'opacity-0'
+          }`}
           onClick={closeModal}
         >
           <div 
-            className="bg-gray-900 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto"
+            className={`bg-gray-900 rounded-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-800/50 transition-all duration-200 ${
+              modalAnimating ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+            }`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
@@ -1127,10 +1185,9 @@ export default function HomePage() {
                   <a
                     href={selectedCreative.download_url}
                     download
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                    className="btn btn-primary"
                   >
-                    <span>📥</span>
-                    <span>Download Archive</span>
+                    Download Archive
                   </a>
                 )}
                 {selectedCreative.download_url && (
@@ -1808,15 +1865,13 @@ export default function HomePage() {
                         const button = e.currentTarget
                         if (button) {
                           button.disabled = false
-                          const originalText = button.querySelector('span:last-child')?.textContent || 'Preview Page'
-                          button.innerHTML = `<span>👁️</span><span>${originalText}</span>`
+                          button.textContent = 'Preview Page'
                         }
                       }
                     }}
-                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
+                    className="btn btn-success"
                   >
-                    <span>👁️</span>
-                    <span>Preview Page</span>
+                    Preview Page
                   </button>
                 )}
                 {selectedCreative.source_link && (
@@ -1824,15 +1879,14 @@ export default function HomePage() {
                     href={selectedCreative.source_link}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                    className="btn btn-primary"
                   >
-                    <span>🔗</span>
-                    <span>Link</span>
+                    Link
                   </a>
                 )}
                 <button
                   onClick={closeModal}
-                  className="text-gray-400 hover:text-white text-2xl font-bold ml-2"
+                  className="btn-ghost btn-sm rounded-full p-2 ml-2"
                 >
                   ×
                 </button>
@@ -1845,10 +1899,9 @@ export default function HomePage() {
                 <a
                   href={selectedCreative.download_url}
                   download
-                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                  className="btn btn-primary btn-full"
                 >
-                  <span>📥</span>
-                  <span>Download Archive</span>
+                  Download Archive
                 </a>
               )}
               {selectedCreative.download_url && (
@@ -2526,15 +2579,16 @@ export default function HomePage() {
                       const button = e.currentTarget
                       if (button) {
                         button.disabled = false
-                        const originalText = button.querySelector('span:last-child')?.textContent || 'Preview Page'
-                        button.innerHTML = `<span>👁️</span><span>${originalText}</span>`
+                        button.textContent = 'Preview Page'
                       }
                     }
                   }}
-                  className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
+                  className="btn"
+                  style={{ backgroundColor: '#16a34a', color: 'white' }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#15803d'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#16a34a'}
                 >
-                  <span>👁️</span>
-                  <span>Preview Page</span>
+                  Preview Page
                 </button>
               )}
               {selectedCreative.source_link && (
@@ -2542,19 +2596,18 @@ export default function HomePage() {
                   href={selectedCreative.source_link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                  className="btn btn-primary btn-full"
                 >
-                  <span>🔗</span>
-                  <span>Link</span>
+                  Link
                 </a>
               )}
             </div>
 
             {/* Modal Content */}
             <div className="p-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 {/* Left Column - Information */}
-                <div>
+                <div className="lg:col-span-7">
                   <h3 className="text-lg font-semibold text-white mb-4">Information</h3>
                   
                   {/* Title */}
@@ -2564,7 +2617,7 @@ export default function HomePage() {
                       {selectedCreative.title && (
                         <button
                           onClick={() => copyToClipboard(selectedCreative.title!, 'title')}
-                          className="p-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors flex items-center justify-center"
+                          className="btn btn-ghost btn-sm p-1.5 rounded"
                           title="Копировать заголовок"
                         >
                           {copiedField === 'title' ? <CheckIcon /> : <CopyIcon />}
@@ -2583,7 +2636,7 @@ export default function HomePage() {
                         <div className="text-sm text-gray-400">Description</div>
                         <button
                           onClick={() => copyToClipboard(selectedCreative.description!, 'description')}
-                          className="p-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors flex items-center justify-center"
+                          className="btn btn-ghost btn-sm p-1.5 rounded"
                           title="Копировать описание"
                         >
                           {copiedField === 'description' ? <CheckIcon /> : <CopyIcon />}
@@ -2710,14 +2763,14 @@ export default function HomePage() {
                 </div>
 
                 {/* Right Column - Media */}
-                <div>
+                <div className="lg:col-span-5">
                   {selectedCreative.media_url ? (
-                    <div className="w-full">
+                    <div className="w-full max-w-lg mx-auto">
                       <div className="relative group">
                         <img
                           src={selectedCreative.media_url}
                           alt={selectedCreative.title || 'Creative'}
-                          className="w-full h-auto rounded-lg border border-gray-700 shadow-sm transition-opacity duration-300"
+                          className="w-full h-auto max-h-[500px] object-contain rounded-lg border border-gray-700 shadow-sm transition-opacity duration-300"
                         />
                         {/* Dark Overlay on Hover */}
                         <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-300 rounded-lg pointer-events-none"></div>
@@ -2812,14 +2865,18 @@ export default function HomePage() {
       )}
 
       {/* Crop Modal */}
-      {showCropModal && cropImage && (
+      {cropModalRender && cropImage && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100] p-4 no-select"
+          className={`fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-[100] p-4 no-select transition-opacity duration-200 ${
+            cropModalAnimating ? 'opacity-100' : 'opacity-0'
+          }`}
           onClick={closeCropModal}
           onContextMenu={(e) => e.preventDefault()}
         >
           <div
-            className="bg-gray-900 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto no-select"
+            className={`bg-gray-900 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto no-select shadow-2xl border border-gray-800/50 transition-all duration-200 ${
+              cropModalAnimating ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+            }`}
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.preventDefault()}
           >
@@ -2912,13 +2969,13 @@ export default function HomePage() {
               <div className="flex gap-4 mt-6">
                 <button
                   onClick={closeCropModal}
-                  className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                  className="btn btn-secondary"
                 >
                   Отмена
                 </button>
                 <button
                   onClick={applyCropAndDownload}
-                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                  className="btn btn-primary"
                 >
                   Скачать обрезанное изображение
                 </button>
@@ -2929,11 +2986,13 @@ export default function HomePage() {
       )}
 
       {/* Full Screenshot Modal */}
-      {showFullScreenshot && selectedCreative?.thumbnail_url && (
+      {fullScreenshotRender && selectedCreative?.thumbnail_url && (
         <>
           {/* Mobile: Full screen */}
           <div 
-            className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-[100] p-2 sm:hidden"
+            className={`fixed inset-0 bg-black/95 backdrop-blur-md flex items-center justify-center z-[100] p-2 sm:hidden transition-opacity duration-200 ${
+              fullScreenshotAnimating ? 'opacity-100' : 'opacity-0'
+            }`}
             onClick={() => {
               console.log('Closing full screenshot')
               setShowFullScreenshot(false)
@@ -2961,7 +3020,9 @@ export default function HomePage() {
 
           {/* Desktop: Inside modal */}
           <div 
-            className="hidden sm:block fixed inset-0 bg-black bg-opacity-75 z-[100] p-4"
+            className={`hidden sm:block fixed inset-0 bg-black/60 backdrop-blur-md z-[100] p-4 transition-opacity duration-200 ${
+              fullScreenshotAnimating ? 'opacity-100' : 'opacity-0'
+            }`}
             onClick={() => {
               console.log('Closing full screenshot')
               setShowFullScreenshot(false)

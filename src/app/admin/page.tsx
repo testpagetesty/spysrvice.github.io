@@ -1418,31 +1418,28 @@ export default function AdminPage() {
           {/* Title and Buttons Row */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 border-b border-gray-800 gap-4">
             <h1 className="text-xl sm:text-2xl font-bold text-white">Admin Panel</h1>
-            
+          
             {/* Buttons - Mobile: centered, PC: right aligned */}
             <div className="flex items-center justify-center sm:justify-end space-x-2">
               <button
                 onClick={toggleTheme}
-                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                className="btn btn-ghost"
                 title={isLightTheme ? 'Переключить на темную тему' : 'Переключить на светлую тему'}
               >
-                <span>{isLightTheme ? '🌙' : '☀️'}</span>
-                <span>{isLightTheme ? 'Темная' : 'Светлая'}</span>
+                {isLightTheme ? 'Темная' : 'Светлая'}
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                className="btn btn-ghost"
                 title="Обновить страницу"
               >
-                <span>🔄</span>
-                <span>Обновить</span>
+                Обновить
               </button>
               <button
                 onClick={handleLogout}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                className="btn btn-danger"
               >
-                <span>🚪</span>
-                <span>Выйти</span>
+                Выйти
               </button>
             </div>
           </div>
@@ -1526,7 +1523,7 @@ export default function AdminPage() {
                 <div className="flex items-center justify-center sm:justify-end space-x-2">
                   <button
                     onClick={() => moderateCreatives('approve', Array.from(selectedCreatives))}
-                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-lg shadow-green-600/20"
+                    className="btn btn-success"
                   >
                     <span>✅</span>
                     <span>Опубликовать ({selectedCreatives.size})</span>
@@ -1753,13 +1750,13 @@ export default function AdminPage() {
                   })
                   loadData()
                 }}
-                className="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                className="btn btn-secondary flex-1"
               >
                 Reset
               </button>
               <button
                 onClick={applyFilters}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors"
+                className="btn btn-primary flex-1"
               >
                 Apply
               </button>
@@ -1923,7 +1920,7 @@ export default function AdminPage() {
                               e.stopPropagation()
                               moderateSingle('approve', creative.id)
                             }}
-                            className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded transition-colors"
+                            className="btn btn-success btn-sm flex-1"
                           >
                             ✅ Опубликовать
                           </button>
@@ -1934,7 +1931,10 @@ export default function AdminPage() {
                               e.stopPropagation()
                               moderateSingle('draft', creative.id)
                             }}
-                            className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs px-2 py-1 rounded transition-colors"
+                            className="btn btn-sm flex-1"
+                            style={{ backgroundColor: '#ca8a04', color: 'white' }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#a16207'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ca8a04'}
                           >
                             🆕 В новые
                           </button>
@@ -1944,7 +1944,7 @@ export default function AdminPage() {
                             e.stopPropagation()
                             deleteSingleCreative(creative.id, creative.title)
                           }}
-                          className="bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded transition-colors flex items-center justify-center gap-1"
+                          className="btn btn-danger btn-sm flex items-center justify-center gap-1"
                           title="Удалить креатив"
                         >
                           <TrashIcon />
@@ -2207,18 +2207,14 @@ export default function AdminPage() {
             <div className="flex justify-end space-x-4 mt-8 pt-6 border-t border-gray-700">
               <button
                 onClick={resetCreateForm}
-                className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-colors"
+                className="btn btn-secondary"
               >
-                🔄 Очистить
+                Очистить
               </button>
               <button
                 onClick={createCreative}
                 disabled={creating || !createForm.title.trim()}
-                className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-                  creating || !createForm.title.trim()
-                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
+                className="btn btn-primary"
               >
                 {creating ? '⏳ Создание...' : '✅ Создать креатив'}
               </button>
@@ -2580,10 +2576,9 @@ export default function AdminPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     download
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                    className="btn btn-primary"
                   >
-                    <span>📥</span>
-                    <span>Download Archive</span>
+                    Download Archive
                   </a>
                 )}
                 {selectedCreative.download_url && (
@@ -3261,15 +3256,13 @@ export default function AdminPage() {
                         const button = e.currentTarget
                         if (button) {
                           button.disabled = false
-                          const originalText = button.querySelector('span:last-child')?.textContent || 'Preview Page'
-                          button.innerHTML = `<span>👁️</span><span>${originalText}</span>`
+                          button.textContent = 'Preview Page'
                         }
                       }
                     }}
-                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
+                    className="btn btn-success"
                   >
-                    <span>👁️</span>
-                    <span>Preview Page</span>
+                    Preview Page
                   </button>
                 )}
                 {selectedCreative.source_link && (
@@ -3277,15 +3270,14 @@ export default function AdminPage() {
                     href={selectedCreative.source_link}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                    className="btn btn-primary"
                   >
-                    <span>🔗</span>
-                    <span>Link</span>
+                    Link
                   </a>
                 )}
                 <button
                   onClick={() => openEditModal(selectedCreative)}
-                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
+                  className="btn btn-success"
                 >
                   <EditIcon />
                   <span>Edit</span>
@@ -3317,10 +3309,9 @@ export default function AdminPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                   download
-                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors text-center"
                 >
-                  <span>📥</span>
-                  <span>Download Archive</span>
+                  Download Archive
                 </a>
               )}
               {selectedCreative.download_url && (
@@ -3998,15 +3989,13 @@ export default function AdminPage() {
                       const button = e.currentTarget
                       if (button) {
                         button.disabled = false
-                        const originalText = button.querySelector('span:last-child')?.textContent || 'Preview Page'
-                        button.innerHTML = `<span>👁️</span><span>${originalText}</span>`
+                        button.textContent = 'Preview Page'
                       }
                     }
                   }}
-                  className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
                 >
-                  <span>👁️</span>
-                  <span>Preview Page</span>
+                  Preview Page
                 </button>
               )}
               {selectedCreative.source_link && (
@@ -4014,15 +4003,14 @@ export default function AdminPage() {
                   href={selectedCreative.source_link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors"
+                  className="btn btn-primary btn-full"
                 >
-                  <span>🔗</span>
-                  <span>Link</span>
+                  Link
                 </a>
               )}
               <button
                 onClick={() => openEditModal(selectedCreative)}
-                className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded transition-colors"
+                className="btn btn-success btn-full"
               >
                 <EditIcon />
                 <span>Edit</span>
@@ -4083,14 +4071,14 @@ export default function AdminPage() {
                         </button>
                       </div>
                     ) : (
-                      <div className="text-base text-white font-medium">
-                        {selectedCreative.title || '-'}
-                      </div>
+                    <div className="text-base text-white font-medium">
+                      {selectedCreative.title || '-'}
+                    </div>
                     )}
                   </div>
 
                   {/* Description */}
-                  <div className="mb-4 pb-4 border-b border-gray-700">
+                    <div className="mb-4 pb-4 border-b border-gray-700">
                     <div className="flex items-center justify-between mb-1">
                       <div className="text-sm text-gray-400">Description</div>
                       {editingField !== 'description' && (
@@ -4102,7 +4090,7 @@ export default function AdminPage() {
                           <EditIcon />
                         </button>
                       )}
-                    </div>
+                      </div>
                     {editingField === 'description' ? (
                       <div className="flex gap-2">
                         <textarea
@@ -4130,8 +4118,8 @@ export default function AdminPage() {
                     ) : (
                       <div className="text-base text-gray-300">
                         {selectedCreative.description || '-'}
-                      </div>
-                    )}
+                    </div>
+                  )}
                   </div>
 
                   {/* Metadata */}
@@ -4168,9 +4156,9 @@ export default function AdminPage() {
                           </div>
                         ) : (
                           <>
-                            <span className="text-sm text-white underline font-medium">
-                              {selectedCreative.formats?.name || '-'}
-                            </span>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.formats?.name || '-'}
+                      </span>
                             <button
                               onClick={() => startEditField('format', selectedCreative.formats?.code || '')}
                               className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
@@ -4180,7 +4168,7 @@ export default function AdminPage() {
                             </button>
                           </>
                         )}
-                      </div>
+                    </div>
                     </div>
                     {/* Type */}
                     <div className="flex justify-between items-center py-2 border-b border-gray-700">
@@ -4214,9 +4202,9 @@ export default function AdminPage() {
                           </div>
                         ) : (
                           <>
-                            <span className="text-sm text-white underline font-medium">
-                              {selectedCreative.types?.name || '-'}
-                            </span>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.types?.name || '-'}
+                      </span>
                             <button
                               onClick={() => startEditField('type', selectedCreative.types?.code || '')}
                               className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
@@ -4226,7 +4214,7 @@ export default function AdminPage() {
                             </button>
                           </>
                         )}
-                      </div>
+                    </div>
                     </div>
                     {/* Placement */}
                     <div className="flex justify-between items-center py-2 border-b border-gray-700">
@@ -4260,9 +4248,9 @@ export default function AdminPage() {
                           </div>
                         ) : (
                           <>
-                            <span className="text-sm text-white underline font-medium">
-                              {selectedCreative.placements?.name || '-'}
-                            </span>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.placements?.name || '-'}
+                      </span>
                             <button
                               onClick={() => startEditField('placement', selectedCreative.placements?.code || '')}
                               className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
@@ -4272,7 +4260,7 @@ export default function AdminPage() {
                             </button>
                           </>
                         )}
-                      </div>
+                    </div>
                     </div>
                     {/* Country */}
                     <div className="flex justify-between items-center py-2 border-b border-gray-700">
@@ -4306,9 +4294,9 @@ export default function AdminPage() {
                           </div>
                         ) : (
                           <>
-                            <span className="text-sm text-white underline font-medium">
-                              {selectedCreative.countries?.name || '-'}
-                            </span>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.countries?.name || '-'}
+                      </span>
                             <button
                               onClick={() => startEditField('country', selectedCreative.country_code || '')}
                               className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
@@ -4318,7 +4306,7 @@ export default function AdminPage() {
                             </button>
                           </>
                         )}
-                      </div>
+                    </div>
                     </div>
                     {/* Platform */}
                     <div className="flex justify-between items-center py-2 border-b border-gray-700">
@@ -4352,9 +4340,9 @@ export default function AdminPage() {
                           </div>
                         ) : (
                           <>
-                            <span className="text-sm text-white underline font-medium">
-                              {selectedCreative.platforms?.name || '-'}
-                            </span>
+                      <span className="text-sm text-white underline font-medium">
+                        {selectedCreative.platforms?.name || '-'}
+                      </span>
                             <button
                               onClick={() => startEditField('platform', selectedCreative.platforms?.code || '')}
                               className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
@@ -4364,7 +4352,7 @@ export default function AdminPage() {
                             </button>
                           </>
                         )}
-                      </div>
+                    </div>
                     </div>
                     {/* Cloaking */}
                     <div className="flex justify-between items-center py-2 border-b border-gray-700">
@@ -4396,11 +4384,11 @@ export default function AdminPage() {
                           </div>
                         ) : (
                           <>
-                            <span className={`text-sm font-medium ${
-                              selectedCreative.cloaking ? 'text-red-400' : 'text-green-400'
-                            }`}>
-                              {selectedCreative.cloaking ? 'Yes' : 'No'}
-                            </span>
+                      <span className={`text-sm font-medium ${
+                        selectedCreative.cloaking ? 'text-red-400' : 'text-green-400'
+                      }`}>
+                        {selectedCreative.cloaking ? 'Yes' : 'No'}
+                      </span>
                             <button
                               onClick={() => startEditField('cloaking', String(selectedCreative.cloaking))}
                               className="p-1 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"

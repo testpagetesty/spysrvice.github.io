@@ -107,7 +107,7 @@ export default function AdBlock({ position }: AdBlockProps) {
             {currentAd.description}
           </p>
           
-          <button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 group-hover:scale-105 transform transition-transform">
+          <button className="btn btn-primary btn-full py-3 flex items-center justify-center gap-2 group-hover:scale-105">
             <span>{currentAd.cta_text}</span>
             <ExternalLink className="w-4 h-4" />
           </button>
