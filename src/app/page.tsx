@@ -13,13 +13,13 @@ const ChevronDownIcon = () => <span>▼</span>
 
 // Copy icon - classic double document icon
 const CopyIcon = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
   </svg>
 )
 
 const CheckIcon = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
   </svg>
 )
@@ -862,87 +862,89 @@ export default function HomePage() {
       {/* Filters */}
       <div className="bg-gray-900 border-b border-gray-800 p-6">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          <div className="flex items-end gap-4 flex-wrap">
             {/* Professional Date Picker */}
-            <div className="relative" ref={dateDropdownRef}>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Date</label>
-              <button
-                type="button"
-                onClick={() => setShowDateDropdown(!showDateDropdown)}
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center justify-between hover:bg-gray-750 transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <CalendarIcon />
-                  <span className="text-sm">{getDateRangeLabel()}</span>
-                </div>
-                <ChevronDownIcon />
-              </button>
+            {filterVisibility.date && (
+              <div className="relative flex-1 min-w-[200px]" ref={dateDropdownRef}>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Date</label>
+                <button
+                  type="button"
+                  onClick={() => setShowDateDropdown(!showDateDropdown)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center justify-between hover:bg-gray-750 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <CalendarIcon />
+                    <span className="text-sm">{getDateRangeLabel()}</span>
+                  </div>
+                  <ChevronDownIcon />
+                </button>
 
-              {showDateDropdown && (
-                <div className="absolute top-full left-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden min-w-[280px] max-w-[320px]">
-                  {/* Quick Presets */}
-                  <div className="p-2 border-b border-gray-700">
-                    <div className="grid grid-cols-2 gap-1">
-                      {datePresets.map((preset, index) => (
+                {showDateDropdown && (
+                  <div className="absolute top-full left-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden min-w-[280px] max-w-[320px]">
+                    {/* Quick Presets */}
+                    <div className="p-2 border-b border-gray-700">
+                      <div className="grid grid-cols-2 gap-1">
+                        {datePresets.map((preset, index) => (
+                          <button
+                            key={index}
+                            onClick={() => selectDatePreset(preset)}
+                            className="text-left px-2 py-1.5 text-xs text-gray-300 hover:bg-gray-700 rounded transition-colors whitespace-nowrap"
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Custom Date Range */}
+                    <div className="p-2">
+                      <div className="text-xs text-gray-400 mb-2 uppercase tracking-wide">Custom Range</div>
+                      <div className="space-y-2">
+                        <input
+                          ref={dateFromRef}
+                          type="date"
+                          value={filters.dateFrom}
+                          onChange={(e) => setFilters({...filters, dateFrom: e.target.value})}
+                          onFocus={() => openDatePicker(dateFromRef)}
+                          className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          placeholder="From"
+                        />
+                        <input
+                          ref={dateToRef}
+                          type="date"
+                          value={filters.dateTo}
+                          onChange={(e) => setFilters({...filters, dateTo: e.target.value})}
+                          onFocus={() => openDatePicker(dateToRef)}
+                          className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          placeholder="To"
+                        />
+                      </div>
+                      <div className="flex gap-1 mt-2">
                         <button
-                          key={index}
-                          onClick={() => selectDatePreset(preset)}
-                          className="text-left px-2 py-1.5 text-xs text-gray-300 hover:bg-gray-700 rounded transition-colors whitespace-nowrap"
+                          onClick={() => {
+                            setFilters({...filters, dateFrom: '', dateTo: ''})
+                            setShowDateDropdown(false)
+                          }}
+                          className="flex-1 px-2 py-1 text-xs text-gray-400 hover:text-white border border-gray-600 rounded hover:border-gray-500 transition-colors"
                         >
-                          {preset.label}
+                          Clear
                         </button>
-                      ))}
+                        <button
+                          onClick={() => setShowDateDropdown(false)}
+                          className="btn btn-primary btn-sm"
+                        >
+                          Apply
+                        </button>
+                      </div>
                     </div>
                   </div>
-
-                  {/* Custom Date Range */}
-                  <div className="p-2">
-                    <div className="text-xs text-gray-400 mb-2 uppercase tracking-wide">Custom Range</div>
-                    <div className="space-y-2">
-                      <input
-                        ref={dateFromRef}
-                        type="date"
-                        value={filters.dateFrom}
-                        onChange={(e) => setFilters({...filters, dateFrom: e.target.value})}
-                        onFocus={() => openDatePicker(dateFromRef)}
-                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        placeholder="From"
-                      />
-                      <input
-                        ref={dateToRef}
-                        type="date"
-                        value={filters.dateTo}
-                        onChange={(e) => setFilters({...filters, dateTo: e.target.value})}
-                        onFocus={() => openDatePicker(dateToRef)}
-                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        placeholder="To"
-                      />
-                    </div>
-                    <div className="flex gap-1 mt-2">
-                      <button
-                        onClick={() => {
-                          setFilters({...filters, dateFrom: '', dateTo: ''})
-                          setShowDateDropdown(false)
-                        }}
-                        className="flex-1 px-2 py-1 text-xs text-gray-400 hover:text-white border border-gray-600 rounded hover:border-gray-500 transition-colors"
-                      >
-                        Clear
-                      </button>
-                      <button
-                        onClick={() => setShowDateDropdown(false)}
-                        className="btn btn-primary btn-sm"
-                      >
-                        Apply
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Format */}
             {filterVisibility.format && (
-              <div>
+              <div className="flex-1 min-w-[200px]">
                 <label className="block text-sm font-medium text-gray-300 mb-2">Format</label>
                 <select 
                   className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -959,7 +961,7 @@ export default function HomePage() {
 
             {/* Type */}
             {filterVisibility.type && (
-              <div>
+              <div className="flex-1 min-w-[200px]">
                 <label className="block text-sm font-medium text-gray-300 mb-2">Type</label>
                 <select 
                   className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -976,7 +978,7 @@ export default function HomePage() {
 
             {/* Placement */}
             {filterVisibility.placement && (
-              <div>
+              <div className="flex-1 min-w-[200px]">
                 <label className="block text-sm font-medium text-gray-300 mb-2">Placement</label>
                 <select 
                   className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -990,12 +992,10 @@ export default function HomePage() {
                 </select>
               </div>
             )}
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Country */}
             {filterVisibility.country && (
-              <div>
+              <div className="flex-1 min-w-[200px]">
                 <label className="block text-sm font-medium text-gray-300 mb-2">Country</label>
                 <select 
                   className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1012,7 +1012,7 @@ export default function HomePage() {
 
             {/* Platform */}
             {filterVisibility.platform && (
-              <div>
+              <div className="flex-1 min-w-[200px]">
                 <label className="block text-sm font-medium text-gray-300 mb-2">Platform</label>
                 <select 
                   className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1029,7 +1029,7 @@ export default function HomePage() {
 
             {/* Cloaking */}
             {filterVisibility.cloaking && (
-              <div>
+              <div className="flex-1 min-w-[200px]">
                 <label className="block text-sm font-medium text-gray-300 mb-2">Cloaking</label>
                 <select 
                   className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1043,10 +1043,8 @@ export default function HomePage() {
               </div>
             )}
 
-            <div></div>
-
-            {/* Apply Button */}
-            <div className="flex items-end gap-2">
+            {/* Action Buttons */}
+            <div className="flex items-end gap-2 flex-shrink-0">
               <button 
                 onClick={() => {
                   setFilters({
@@ -1061,7 +1059,7 @@ export default function HomePage() {
                   })
                   loadDataWithFilters(1)
                 }}
-                className="btn btn-secondary flex-1"
+                className="btn btn-secondary"
               >
                 Reset
               </button>
@@ -1070,11 +1068,16 @@ export default function HomePage() {
                   setCurrentPage(1)
                   applyFilters()
                 }}
-                className="btn btn-primary flex-1"
+                className="btn btn-primary"
               >
                 Apply
               </button>
             </div>
+          </div>
+          
+          {/* DeamonGen */}
+          <div className="mt-4">
+            <h2 className="text-lg font-bold text-red-600">DeamonGen</h2>
           </div>
         </div>
       </div>
@@ -1259,11 +1262,13 @@ export default function HomePage() {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-700">
-              <h2 className="text-2xl font-bold text-white">
-                {selectedCreative.title || 'Creative Details'}
+            <div className="flex items-center justify-between p-6 border-b border-gray-700 gap-4">
+              <h2 className="text-2xl font-bold text-white flex-1 min-w-0 pr-4 overflow-hidden">
+                <span className="block truncate" title={selectedCreative.title || 'Creative Details'}>
+                  {selectedCreative.title || 'Creative Details'}
+                </span>
               </h2>
-              <div className="hidden sm:flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-3 flex-shrink-0">
                 {selectedCreative.download_url && (
                   <a
                     href={selectedCreative.download_url}
@@ -1969,7 +1974,7 @@ export default function HomePage() {
                 )}
                 <button
                   onClick={closeModal}
-                  className="btn-ghost btn-sm rounded-full p-2 ml-2"
+                  className="btn-ghost rounded-full p-2 ml-2 text-white hover:text-white hover:bg-gray-700 text-2xl font-bold w-10 h-10 flex items-center justify-center"
                 >
                   ×
                 </button>
@@ -2700,7 +2705,7 @@ export default function HomePage() {
                       {selectedCreative.title && (
                         <button
                           onClick={() => copyToClipboard(selectedCreative.title!, 'title')}
-                          className="btn btn-ghost btn-sm p-1.5 rounded"
+                          className="btn btn-ghost btn-sm p-2 rounded text-white hover:text-white hover:bg-gray-700"
                           title="Копировать заголовок"
                         >
                           {copiedField === 'title' ? <CheckIcon /> : <CopyIcon />}
@@ -2719,7 +2724,7 @@ export default function HomePage() {
                         <div className="text-sm text-gray-400">Description</div>
                         <button
                           onClick={() => copyToClipboard(selectedCreative.description!, 'description')}
-                          className="btn btn-ghost btn-sm p-1.5 rounded"
+                          className="btn btn-ghost btn-sm p-2 rounded text-white hover:text-white hover:bg-gray-700"
                           title="Копировать описание"
                         >
                           {copiedField === 'description' ? <CheckIcon /> : <CopyIcon />}

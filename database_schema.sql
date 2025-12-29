@@ -94,10 +94,7 @@ CREATE TRIGGER set_creatives_updated_at
 
 -- Заполнение справочников базовыми данными
 INSERT INTO formats (code, name) VALUES 
-    ('teaser', 'Teaser'),
-    ('video', 'Video'),
-    ('banner', 'Banner'),
-    ('image', 'Image')
+    ('teaser', 'Teaser')
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO types (code, name) VALUES 
@@ -112,23 +109,12 @@ INSERT INTO types (code, name) VALUES
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO placements (code, name) VALUES 
-    ('demand_gen', 'Demand Gen'),
-    ('uac', 'UAC'),
-    ('facebook_ads', 'Facebook Ads'),
-    ('google_ads', 'Google Ads'),
-    ('youtube_ads', 'YouTube Ads'),
-    ('native', 'Native'),
-    ('push', 'Push')
+    ('demand_gen', 'Demand Gen')
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO platforms (code, name) VALUES 
-    ('web', 'Web'),
-    ('google', 'Google'),
     ('youtube', 'YouTube'),
-    ('facebook', 'Facebook'),
-    ('instagram', 'Instagram'),
-    ('tiktok', 'TikTok'),
-    ('telegram', 'Telegram')
+    ('discovery', 'Discovery')
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO countries (code, name) VALUES 
