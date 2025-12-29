@@ -32,6 +32,12 @@ html.light-theme [style*="background-image"] {
   filter: invert(1) hue-rotate(180deg);
 }
 
+/* Кнопки с белым фоном исключены из инверсии темы */
+html.light-theme .no-theme-invert,
+html.light-theme .no-theme-invert img {
+  filter: none !important;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
@@ -64,4 +70,26 @@ html.light-theme [style*="background-image"] {
 .card-hover:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+/* Блокировка выделения текста и изображений */
+.no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.no-select img {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
+  user-drag: none;
+  pointer-events: none;
 }

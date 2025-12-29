@@ -130,11 +130,17 @@ export default function HomePage() {
   const [showModal, setShowModal] = useState(false)
   const [showFullScreenshot, setShowFullScreenshot] = useState(false)
   const [copiedField, setCopiedField] = useState<string | null>(null)
+  const [showCropModal, setShowCropModal] = useState(false)
+  const [cropImage, setCropImage] = useState<string | null>(null)
+  const [cropStart, setCropStart] = useState({ x: 0, y: 0 })
+  const [cropEnd, setCropEnd] = useState({ x: 0, y: 0 })
+  const [isCropping, setIsCropping] = useState(false)
+  const [cropImageRef, setCropImageRef] = useState<HTMLImageElement | null>(null)
   const dateDropdownRef = useRef<HTMLDivElement>(null)
 
   // Блокируем скролл страницы когда открыта модалка
   useEffect(() => {
-    if (showModal || showFullScreenshot) {
+    if (showModal || showFullScreenshot || showCropModal) {
       document.body.style.overflow = 'hidden'
     } else {
       document.body.style.overflow = ''
@@ -144,7 +150,7 @@ export default function HomePage() {
     return () => {
       document.body.style.overflow = ''
     }
-  }, [showModal, showFullScreenshot])
+  }, [showModal, showFullScreenshot, showCropModal])
 
   const dateFromRef = useRef<DateInputWithPicker | null>(null)
   const dateToRef = useRef<DateInputWithPicker | null>(null)
@@ -244,6 +250,219 @@ export default function HomePage() {
     }
   }
 
+  // Скачать тизер
+  const downloadTeaser = async (imageUrl: string) => {
+    try {
+      // Загружаем изображение
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      
+      await new Promise((resolve, reject) => {
+        img.onload = resolve
+        img.onerror = reject
+        img.src = imageUrl
+      })
+
+      // Создаем canvas и рисуем изображение
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')
+      
+      if (!ctx) {
+        throw new Error('Не удалось получить контекст canvas')
+      }
+      
+      ctx.drawImage(img, 0, 0)
+
+      // Конвертируем в PNG blob
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          alert('Ошибка при конвертации изображения в PNG')
+          return
+        }
+        
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `teaser_${selectedCreative?.id || Date.now()}.png`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+      }, 'image/png')
+    } catch (error) {
+      console.error('Failed to download teaser:', error)
+      alert('Ошибка при скачивании тизера')
+    }
+  }
+
+  // Открыть модальное окно для обрезания
+  const openCropModal = (imageUrl: string) => {
+    setCropImage(imageUrl)
+    setShowCropModal(true)
+    setCropStart({ x: 0, y: 0 })
+    setCropEnd({ x: 0, y: 0 })
+    setIsCropping(false)
+  }
+
+  // Закрыть модальное окно обрезания
+  const closeCropModal = () => {
+    setShowCropModal(false)
+    setCropImage(null)
+    setCropStart({ x: 0, y: 0 })
+    setCropEnd({ x: 0, y: 0 })
+    setIsCropping(false)
+    setCropImageRef(null)
+    isMouseDownRef.current = false
+  }
+
+  const cropImageContainerRef = useRef<HTMLDivElement>(null)
+  const isMouseDownRef = useRef(false)
+
+  // Начать обрезание
+  const startCrop = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!cropImageContainerRef.current) return
+    e.preventDefault()
+    e.stopPropagation()
+    isMouseDownRef.current = true
+    const rect = cropImageContainerRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    setCropStart({ x, y })
+    setCropEnd({ x, y })
+    setIsCropping(true)
+  }
+
+  // Обновить область обрезания
+  const updateCrop = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isMouseDownRef.current || !cropImageContainerRef.current) return
+    e.preventDefault()
+    e.stopPropagation()
+    const rect = cropImageContainerRef.current.getBoundingClientRect()
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
+    const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height))
+    setCropEnd({ x, y })
+    setIsCropping(true)
+  }
+
+  // Завершить обрезание
+  const endCrop = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    isMouseDownRef.current = false
+    setIsCropping(false)
+  }
+
+  // Обработчик мыши вне контейнера (для глобального отслеживания)
+  useEffect(() => {
+    if (!showCropModal) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isMouseDownRef.current || !cropImageContainerRef.current) return
+      
+      const rect = cropImageContainerRef.current.getBoundingClientRect()
+      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
+      const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height))
+      setCropEnd({ x, y })
+    }
+
+    const handleMouseUp = () => {
+      isMouseDownRef.current = false
+      setIsCropping(false)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [showCropModal])
+
+  // Применить обрезание и скачать
+  const applyCropAndDownload = () => {
+    if (!cropImageRef || !cropImageContainerRef.current) return
+
+    const containerRect = cropImageContainerRef.current.getBoundingClientRect()
+    const img = cropImageRef
+    
+    // Вычислить координаты области обрезания
+    const x = Math.min(cropStart.x, cropEnd.x)
+    const y = Math.min(cropStart.y, cropEnd.y)
+    const width = Math.abs(cropEnd.x - cropStart.x)
+    const height = Math.abs(cropEnd.y - cropStart.y)
+
+    if (width === 0 || height === 0) {
+      alert('Выберите область для обрезания')
+      return
+    }
+
+    // Найти элемент изображения для получения его реальных размеров
+    const imgElement = cropImageContainerRef.current.querySelector('img') as HTMLImageElement
+    if (!imgElement) return
+
+    // Вычислить масштаб между отображаемым размером и реальным размером изображения
+    const displayedWidth = imgElement.offsetWidth
+    const displayedHeight = imgElement.offsetHeight
+    const scaleX = img.naturalWidth / displayedWidth
+    const scaleY = img.naturalHeight / displayedHeight
+
+    // Создать новый canvas для обрезанного изображения
+    const croppedCanvas = document.createElement('canvas')
+    croppedCanvas.width = width * scaleX
+    croppedCanvas.height = height * scaleY
+    const ctx = croppedCanvas.getContext('2d')
+    if (!ctx) return
+
+    // Нарисовать обрезанную область
+    ctx.drawImage(
+      img,
+      x * scaleX,
+      y * scaleY,
+      width * scaleX,
+      height * scaleY,
+      0,
+      0,
+      width * scaleX,
+      height * scaleY
+    )
+
+    // Конвертировать в blob и скачать
+    croppedCanvas.toBlob((blob) => {
+      if (!blob) {
+        alert('Ошибка при создании обрезанного изображения')
+        return
+      }
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `teaser_cropped_${selectedCreative?.id || Date.now()}.png`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+      closeCropModal()
+    }, 'image/png')
+  }
+
+  // Загрузить изображение для обрезания
+  useEffect(() => {
+    if (showCropModal && cropImage) {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        setCropImageRef(img)
+      }
+      img.onerror = () => {
+        alert('Ошибка загрузки изображения')
+        closeCropModal()
+      }
+      img.src = cropImage
+    }
+  }, [showCropModal, cropImage])
+
   const filterByCloaking = (cloakingValue: boolean | null) => {
     const newFilters = {...filters, cloaking: cloakingValue === null ? '' : cloakingValue ? 'true' : 'false'}
     setFilters(newFilters)
@@ -313,7 +532,9 @@ export default function HomePage() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (showFullScreenshot) {
+        if (showCropModal) {
+          closeCropModal()
+        } else if (showFullScreenshot) {
           setShowFullScreenshot(false)
         } else if (showModal) {
           closeModal()
@@ -322,7 +543,7 @@ export default function HomePage() {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [showModal, showFullScreenshot])
+  }, [showModal, showFullScreenshot, showCropModal])
 
   useEffect(() => {
     loadData()
@@ -486,7 +707,7 @@ export default function HomePage() {
           {/* Title and Buttons Row */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-4 border-b border-gray-800 gap-4">
             <h1 className="text-xl sm:text-2xl font-bold text-white">Spy Service</h1>
-            
+          
             {/* Buttons - Mobile: centered, PC: right aligned */}
             <div className="flex items-center justify-center sm:justify-end space-x-2 sm:space-x-4">
               <button
@@ -2492,11 +2713,46 @@ export default function HomePage() {
                 <div>
                   {selectedCreative.media_url ? (
                     <div className="w-full">
-                      <img
-                        src={selectedCreative.media_url}
-                        alt={selectedCreative.title || 'Creative'}
-                        className="w-full h-auto rounded-lg border border-gray-700 shadow-sm"
-                      />
+                      <div className="relative group">
+                        <img
+                          src={selectedCreative.media_url}
+                          alt={selectedCreative.title || 'Creative'}
+                          className="w-full h-auto rounded-lg border border-gray-700 shadow-sm transition-opacity duration-300"
+                        />
+                        {/* Dark Overlay on Hover */}
+                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-opacity duration-300 rounded-lg pointer-events-none"></div>
+                        {/* Action Buttons - Centered */}
+                        <div className="absolute inset-0 flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              downloadTeaser(selectedCreative.media_url!)
+                            }}
+                            className="no-theme-invert bg-white hover:bg-gray-100 p-4 rounded-lg transition-all flex items-center justify-center shadow-lg pointer-events-auto transform hover:scale-110"
+                            title="Скачать тизер"
+                          >
+                            <img
+                              src="/free-icon-download-arrow-81500.png"
+                              alt="Download"
+                              className="w-8 h-8"
+                            />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openCropModal(selectedCreative.media_url!)
+                            }}
+                            className="no-theme-invert bg-white hover:bg-gray-100 p-4 rounded-lg transition-all flex items-center justify-center shadow-lg pointer-events-auto transform hover:scale-110"
+                            title="Обрезать тизер"
+                          >
+                            <img
+                              src="/free-icon-resize-6297749.png"
+                              alt="Crop"
+                              className="w-8 h-8"
+                            />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <div className="aspect-video bg-gray-800 flex items-center justify-center rounded-lg border border-gray-700">
@@ -2550,6 +2806,123 @@ export default function HomePage() {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Crop Modal */}
+      {showCropModal && cropImage && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-[100] p-4 no-select"
+          onClick={closeCropModal}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div
+            className="bg-gray-900 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto no-select"
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-700">
+              <h2 className="text-2xl font-bold text-white">Обрезать тизер</h2>
+              <button
+                onClick={closeCropModal}
+                className="text-gray-400 hover:text-white text-2xl font-bold"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Image with Crop Overlay */}
+            <div className="p-6 flex flex-col items-center">
+              <div className="mb-4 text-sm text-gray-400 text-center">
+                Выберите область для обрезания, зажав левую кнопку мыши и перетаскивая
+              </div>
+              <div
+                ref={cropImageContainerRef}
+                className="relative border border-gray-700 rounded-lg overflow-hidden cursor-crosshair inline-block no-select"
+                style={{ maxWidth: '100%' }}
+                onMouseDown={startCrop}
+                onMouseMove={updateCrop}
+                onMouseUp={endCrop}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                {cropImage && (
+                  <>
+                    <img
+                      src={cropImage}
+                      alt="Crop preview"
+                      className="max-w-full max-h-[70vh] w-auto h-auto block"
+                      style={{ display: 'block' }}
+                      draggable={false}
+                      onContextMenu={(e) => e.preventDefault()}
+                      onDragStart={(e) => e.preventDefault()}
+                    />
+                    {/* Crop Overlay */}
+                    {(cropStart.x !== cropEnd.x || cropStart.y !== cropEnd.y) && cropImageContainerRef.current && (
+                      <>
+                        {/* Затемнение вне области через SVG mask для четкого отображения */}
+                        <svg
+                          className="absolute inset-0 pointer-events-none"
+                          style={{ width: '100%', height: '100%' }}
+                        >
+                          <defs>
+                            <mask id={`cropMask-${selectedCreative?.id || 'default'}`}>
+                              <rect width="100%" height="100%" fill="white" />
+                              <rect
+                                x={Math.min(cropStart.x, cropEnd.x)}
+                                y={Math.min(cropStart.y, cropEnd.y)}
+                                width={Math.abs(cropEnd.x - cropStart.x)}
+                                height={Math.abs(cropEnd.y - cropStart.y)}
+                                fill="black"
+                              />
+                            </mask>
+                          </defs>
+                          <rect
+                            width="100%"
+                            height="100%"
+                            fill="rgba(0, 0, 0, 0.6)"
+                            mask={`url(#cropMask-${selectedCreative?.id || 'default'})`}
+                          />
+                        </svg>
+                        {/* Рамка выбора */}
+                        <div
+                          className="absolute border-2 border-blue-500 pointer-events-none z-10 bg-transparent"
+                          style={{
+                            left: `${Math.min(cropStart.x, cropEnd.x)}px`,
+                            top: `${Math.min(cropStart.y, cropEnd.y)}px`,
+                            width: `${Math.abs(cropEnd.x - cropStart.x)}px`,
+                            height: `${Math.abs(cropEnd.y - cropStart.y)}px`,
+                          }}
+                        >
+                          {/* Углы */}
+                          <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-blue-500 bg-transparent" style={{ borderWidth: '3px 0 0 3px' }} />
+                          <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-blue-500 bg-transparent" style={{ borderWidth: '3px 3px 0 0' }} />
+                          <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-blue-500 bg-transparent" style={{ borderWidth: '0 0 3px 3px' }} />
+                          <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-blue-500 bg-transparent" style={{ borderWidth: '0 3px 3px 0' }} />
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+              
+              {/* Action Buttons */}
+              <div className="flex gap-4 mt-6">
+                <button
+                  onClick={closeCropModal}
+                  className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={applyCropAndDownload}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                >
+                  Скачать обрезанное изображение
+                </button>
+              </div>
             </div>
           </div>
         </div>
