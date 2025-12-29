@@ -79,6 +79,77 @@ const ALLOWED_PLATFORM_CODES = ['web', 'google_play', 'youtube', 'discovery']
 export default function HomePage() {
   const [isLightTheme, setIsLightTheme] = useState(false)
   
+  // Состояние видимости фильтров
+  const [filterVisibility, setFilterVisibility] = useState({
+    date: true,
+    format: true,
+    type: true,
+    placement: true,
+    country: true,
+    platform: true,
+    cloaking: true
+  })
+
+  // Загружаем настройки видимости фильтров
+  useEffect(() => {
+    const loadFilterSettings = async () => {
+      try {
+        // Пытаемся загрузить с сервера
+        const response = await fetch('/api/dashboard-settings')
+        if (response.ok) {
+          const data = await response.json()
+          if (data.settings?.filters) {
+            setFilterVisibility({
+              date: data.settings.filters.date !== false, // Date всегда видим по умолчанию
+              format: data.settings.filters.format !== false,
+              type: data.settings.filters.type !== false,
+              placement: data.settings.filters.placement !== false,
+              country: data.settings.filters.country !== false,
+              platform: data.settings.filters.platform !== false,
+              cloaking: data.settings.filters.cloaking !== false
+            })
+            return
+          }
+        }
+      } catch (e) {
+        console.error('Error loading dashboard settings from API:', e)
+      }
+
+      // Fallback на localStorage если API недоступен
+      const settings = localStorage.getItem('dashboardSettings')
+      if (settings) {
+        try {
+          const parsed = JSON.parse(settings)
+          if (parsed.filters) {
+            setFilterVisibility({
+              date: parsed.filters.date !== false,
+              format: parsed.filters.format !== false,
+              type: parsed.filters.type !== false,
+              placement: parsed.filters.placement !== false,
+              country: parsed.filters.country !== false,
+              platform: parsed.filters.platform !== false,
+              cloaking: parsed.filters.cloaking !== false
+            })
+          }
+        } catch (e) {
+          console.error('Error loading dashboard settings from localStorage:', e)
+        }
+      }
+    }
+
+    loadFilterSettings()
+
+    // Слушаем изменения для обновления без перезагрузки
+    const handleCustomStorageChange = async () => {
+      await loadFilterSettings()
+    }
+    window.addEventListener('dashboardSettingsChanged', handleCustomStorageChange)
+
+    return () => {
+      window.removeEventListener('dashboardSettingsChanged', handleCustomStorageChange)
+    }
+  }, [])
+  
   // Простое переключение темы через CSS инверсию
   const toggleTheme = () => {
     const newTheme = !isLightTheme
@@ -870,95 +941,107 @@ export default function HomePage() {
             </div>
 
             {/* Format */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Format</label>
-              <select 
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={filters.format}
-                onChange={(e) => setFilters({...filters, format: e.target.value})}
-              >
-                <option value="">All</option>
-                {formats.map(format => (
-                  <option key={format.id} value={format.code}>{format.name}</option>
-                ))}
-              </select>
-            </div>
+            {filterVisibility.format && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Format</label>
+                <select 
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={filters.format}
+                  onChange={(e) => setFilters({...filters, format: e.target.value})}
+                >
+                  <option value="">All</option>
+                  {formats.map(format => (
+                    <option key={format.id} value={format.code}>{format.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Type */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Type</label>
-              <select 
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={filters.type}
-                onChange={(e) => setFilters({...filters, type: e.target.value})}
-              >
-                <option value="">All</option>
-                {types.map(type => (
-                  <option key={type.id} value={type.code}>{type.name}</option>
-                ))}
-              </select>
-            </div>
+            {filterVisibility.type && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Type</label>
+                <select 
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={filters.type}
+                  onChange={(e) => setFilters({...filters, type: e.target.value})}
+                >
+                  <option value="">All</option>
+                  {types.map(type => (
+                    <option key={type.id} value={type.code}>{type.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Placement */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Placement</label>
-              <select 
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={filters.placement}
-                onChange={(e) => setFilters({...filters, placement: e.target.value})}
-              >
-                <option value="">All</option>
-                {placements.map(placement => (
-                  <option key={placement.id} value={placement.code}>{placement.name}</option>
-                ))}
-              </select>
-            </div>
+            {filterVisibility.placement && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Placement</label>
+                <select 
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={filters.placement}
+                  onChange={(e) => setFilters({...filters, placement: e.target.value})}
+                >
+                  <option value="">All</option>
+                  {placements.map(placement => (
+                    <option key={placement.id} value={placement.code}>{placement.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Country */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Country</label>
-              <select 
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={filters.country}
-                onChange={(e) => setFilters({...filters, country: e.target.value})}
-              >
-                <option value="">All</option>
-                {countries.map(country => (
-                  <option key={country.id} value={country.code}>{country.name}</option>
-                ))}
-              </select>
-            </div>
+            {filterVisibility.country && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Country</label>
+                <select 
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={filters.country}
+                  onChange={(e) => setFilters({...filters, country: e.target.value})}
+                >
+                  <option value="">All</option>
+                  {countries.map(country => (
+                    <option key={country.id} value={country.code}>{country.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Platform */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Platform</label>
-              <select 
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={filters.platform}
-                onChange={(e) => setFilters({...filters, platform: e.target.value})}
-              >
-                <option value="">All</option>
-                {platforms.map(platform => (
-                  <option key={platform.id} value={platform.code}>{platform.name}</option>
-                ))}
-              </select>
-            </div>
+            {filterVisibility.platform && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Platform</label>
+                <select 
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={filters.platform}
+                  onChange={(e) => setFilters({...filters, platform: e.target.value})}
+                >
+                  <option value="">All</option>
+                  {platforms.map(platform => (
+                    <option key={platform.id} value={platform.code}>{platform.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Cloaking */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Cloaking</label>
-              <select 
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={filters.cloaking}
-                onChange={(e) => setFilters({...filters, cloaking: e.target.value})}
-              >
-                <option value="">All</option>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
-            </div>
+            {filterVisibility.cloaking && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Cloaking</label>
+                <select 
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={filters.cloaking}
+                  onChange={(e) => setFilters({...filters, cloaking: e.target.value})}
+                >
+                  <option value="">All</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </div>
+            )}
 
             <div></div>
 

@@ -128,10 +128,116 @@ export default function AdminPage() {
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
   
   // Tab states
-  const [activeTab, setActiveTab] = useState<'list' | 'create' | 'ads'>('list')
+  const [activeTab, setActiveTab] = useState<'list' | 'create' | 'ads' | 'dashboard'>('list')
   
   // Ads settings states
   const [adsSettings, setAdsSettings] = useState<any[]>([])
+
+  // Dashboard settings states
+  const [dashboardFilterSettings, setDashboardFilterSettings] = useState({
+    date: true,
+    format: true,
+    type: true,
+    placement: true,
+    country: true,
+    platform: true,
+    cloaking: true
+  })
+
+  // Загружаем настройки фильтров при открытии таба
+  useEffect(() => {
+    if (activeTab === 'dashboard') {
+      loadDashboardSettings()
+    }
+  }, [activeTab])
+
+  const loadDashboardSettings = async () => {
+    try {
+      const response = await fetch('/api/dashboard-settings')
+      if (!response.ok) {
+        throw new Error('Failed to load settings')
+      }
+      const data = await response.json()
+      
+      if (data.settings?.filters) {
+        setDashboardFilterSettings({
+          date: data.settings.filters.date !== false,
+          format: data.settings.filters.format !== false,
+          type: data.settings.filters.type !== false,
+          placement: data.settings.filters.placement !== false,
+          country: data.settings.filters.country !== false,
+          platform: data.settings.filters.platform !== false,
+          cloaking: data.settings.filters.cloaking !== false
+        })
+      }
+    } catch (e) {
+      console.error('Error loading dashboard settings:', e)
+      // Fallback на localStorage если API недоступен
+      const settings = localStorage.getItem('dashboardSettings')
+      if (settings) {
+        try {
+          const parsed = JSON.parse(settings)
+          if (parsed.filters) {
+            setDashboardFilterSettings({
+              date: parsed.filters.date !== false,
+              format: parsed.filters.format !== false,
+              type: parsed.filters.type !== false,
+              placement: parsed.filters.placement !== false,
+              country: parsed.filters.country !== false,
+              platform: parsed.filters.platform !== false,
+              cloaking: parsed.filters.cloaking !== false
+            })
+          }
+        } catch (err) {
+          console.error('Error parsing localStorage settings:', err)
+        }
+      }
+    }
+  }
+
+  const saveDashboardFilterSettings = async (filterKey: string, value: boolean) => {
+    try {
+      // Обновляем локальное состояние сразу для мгновенного отклика UI
+      const updatedFilters = {
+        ...dashboardFilterSettings,
+        [filterKey]: value
+      }
+      setDashboardFilterSettings(updatedFilters)
+      
+      // Сохраняем через API
+      const saveResponse = await fetch('/api/dashboard-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          key: 'filters',
+          value: updatedFilters
+        })
+      })
+      
+      if (!saveResponse.ok) {
+        throw new Error('Failed to save settings')
+      }
+      
+      // Также сохраняем в localStorage как fallback
+      const settings = JSON.parse(localStorage.getItem('dashboardSettings') || '{}')
+      settings.filters = updatedFilters
+      localStorage.setItem('dashboardSettings', JSON.stringify(settings))
+      
+      // Отправляем событие для обновления главной страницы
+      window.dispatchEvent(new Event('dashboardSettingsChanged'))
+      
+    } catch (e) {
+      console.error('Error saving dashboard settings:', e)
+      // Fallback на localStorage
+      const settings = JSON.parse(localStorage.getItem('dashboardSettings') || '{}')
+      settings.filters = settings.filters || {}
+      settings.filters[filterKey] = value
+      localStorage.setItem('dashboardSettings', JSON.stringify(settings))
+      window.dispatchEvent(new Event('dashboardSettingsChanged'))
+    }
+  }
   const [editingAd, setEditingAd] = useState<any | null>(null)
   const [adForm, setAdForm] = useState({
     position: 'modal',
@@ -1479,6 +1585,17 @@ export default function AdminPage() {
               >
                 <span>📢</span>
                 <span>Настройки рекламы</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                  activeTab === 'dashboard' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-300 hover:text-white hover:bg-gray-800'
+                }`}
+              >
+                <span>⚙️</span>
+                <span>Настройка дашборда</span>
               </button>
             </div>
           </div>
@@ -4805,6 +4922,312 @@ export default function AdminPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Dashboard Settings Tab */}
+      {activeTab === 'dashboard' && (
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
+          <div className="bg-gray-900 rounded-lg p-4 sm:p-6">
+            <h2 className="text-xl sm:text-2xl font-bold text-white mb-6">⚙️ Настройка дашборда</h2>
+
+            <div className="space-y-6">
+              {/* Display Settings */}
+              <div className="bg-gray-800 rounded-lg p-4 sm:p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Настройки отображения</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Количество элементов на странице
+                    </label>
+                    <select
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      defaultValue="20"
+                    >
+                      <option value="10">10</option>
+                      <option value="20">20</option>
+                      <option value="30">30</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">Количество креативов, отображаемых на одной странице</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Сортировка по умолчанию
+                    </label>
+                    <select
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      defaultValue="newest"
+                    >
+                      <option value="newest">Сначала новые</option>
+                      <option value="oldest">Сначала старые</option>
+                      <option value="title_asc">По названию (А-Я)</option>
+                      <option value="title_desc">По названию (Я-А)</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="showThumbnails"
+                      defaultChecked
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="showThumbnails" className="text-sm text-gray-300">
+                      Показывать миниатюры изображений
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="showDescriptions"
+                      defaultChecked
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="showDescriptions" className="text-sm text-gray-300">
+                      Показывать описания креативов
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter Visibility Settings */}
+              <div className="bg-gray-800 rounded-lg p-4 sm:p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Видимость фильтров</h3>
+                <p className="text-sm text-gray-400 mb-4">Выберите, какие фильтры отображать в дашборде</p>
+                
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showDateFilter"
+                        checked={dashboardFilterSettings.date}
+                        disabled
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500 opacity-50 cursor-not-allowed"
+                      />
+                      <label htmlFor="showDateFilter" className="text-sm font-medium text-white">
+                        Date (Дата)
+                      </label>
+                    </div>
+                    <span className="text-xs text-gray-400">Обязательный</span>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showFormatFilter"
+                        checked={dashboardFilterSettings.format}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('format', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showFormatFilter" className="text-sm font-medium text-white">
+                        Format (Формат)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showTypeFilter"
+                        checked={dashboardFilterSettings.type}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('type', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showTypeFilter" className="text-sm font-medium text-white">
+                        Type (Тип)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showPlacementFilter"
+                        checked={dashboardFilterSettings.placement}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('placement', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showPlacementFilter" className="text-sm font-medium text-white">
+                        Placement (Размещение)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showCountryFilter"
+                        checked={dashboardFilterSettings.country}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('country', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showCountryFilter" className="text-sm font-medium text-white">
+                        Country (Страна)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showPlatformFilter"
+                        checked={dashboardFilterSettings.platform}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('platform', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showPlatformFilter" className="text-sm font-medium text-white">
+                        Platform (Платформа)
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="showCloakingFilter"
+                        checked={dashboardFilterSettings.cloaking}
+                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                        onChange={(e) => {
+                          saveDashboardFilterSettings('cloaking', e.target.checked)
+                        }}
+                      />
+                      <label htmlFor="showCloakingFilter" className="text-sm font-medium text-white">
+                        Cloaking (Клоакинг)
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter Settings */}
+              <div className="bg-gray-800 rounded-lg p-4 sm:p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Настройки фильтров</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Период по умолчанию
+                    </label>
+                    <select
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      defaultValue="all"
+                    >
+                      <option value="all">Все время</option>
+                      <option value="today">Сегодня</option>
+                      <option value="week">Последние 7 дней</option>
+                      <option value="month">Последние 30 дней</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Advanced Settings */}
+              <div className="bg-gray-800 rounded-lg p-4 sm:p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Дополнительные настройки</h3>
+                
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="enableAutoRefresh"
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="enableAutoRefresh" className="text-sm text-gray-300">
+                      Автоматическое обновление данных
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Интервал автообновления (секунды)
+                    </label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="300"
+                      step="10"
+                      defaultValue="60"
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="enableNotifications"
+                      defaultChecked
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="enableNotifications" className="text-sm text-gray-300">
+                      Показывать уведомления о новых креативах
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="flex justify-end gap-4 pt-4 border-t border-gray-700">
+                <button
+                  onClick={() => setActiveTab('list')}
+                  className="btn btn-secondary"
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      // Сохраняем все текущие настройки через API
+                      const response = await fetch('/api/dashboard-settings', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                          key: 'filters',
+                          value: dashboardFilterSettings
+                        })
+                      })
+                      
+                      if (response.ok) {
+                        alert('Настройки успешно сохранены! Изменения применятся на всех устройствах.')
+                        window.dispatchEvent(new Event('dashboardSettingsChanged'))
+                      } else {
+                        throw new Error('Failed to save')
+                      }
+                    } catch (e) {
+                      console.error('Error saving settings:', e)
+                      alert('Ошибка при сохранении настроек. Попробуйте еще раз.')
+                    }
+                  }}
+                  className="btn btn-primary"
+                >
+                  Сохранить настройки
+                </button>
+              </div>
+            </div>
+          </div>
+        </main>
       )}
     </div>
   )
