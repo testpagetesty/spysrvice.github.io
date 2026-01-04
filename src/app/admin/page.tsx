@@ -770,23 +770,15 @@ export default function AdminPage() {
             )
           }
         } catch (error) {
-            console.error('Error fetching updated creative:', error)
-            // Fallback: update local state with the edited value
-            const updatedCreative = { ...selectedCreative } as Creative
-            if (fieldName === 'title') {
-              updatedCreative.title = fieldEditValue
-            } else if (fieldName === 'description') {
-              updatedCreative.description = fieldEditValue || undefined
-            }
-            setSelectedCreative(updatedCreative)
+          console.error('Error fetching updated creative:', error)
+          // Fallback: update local state with the edited value
+          const updatedCreative = { ...selectedCreative } as Creative
+          if (fieldName === 'title') {
+            updatedCreative.title = fieldEditValue
+          } else if (fieldName === 'description') {
+            updatedCreative.description = fieldEditValue || undefined
           }
-        } else {
-          // Fallback: update local state only
-          const updatedCreative = { ...selectedCreative, ...result.creative } as Creative
           setSelectedCreative(updatedCreative)
-          setCreatives(prevCreatives => 
-            prevCreatives.map(c => c.id === updatedCreative.id ? updatedCreative : c)
-          )
         }
         
         setEditingField(null)
