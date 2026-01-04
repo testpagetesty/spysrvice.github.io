@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { getSignedUrl as getS3SignedUrl } from '@aws-sdk/s3-request-presigner'
 
 // Конфигурация S3 клиента (Beget S3 или другой S3-compatible storage)
 const s3Client = new S3Client({
@@ -99,6 +99,6 @@ export async function getSignedUrl(path: string, expiresIn: number = 3600): Prom
     Key: path,
   })
   
-  return await getSignedUrl(s3Client, command, { expiresIn })
+  return await getS3SignedUrl(s3Client, command, { expiresIn })
 }
 
