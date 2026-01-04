@@ -1,13 +1,18 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
-    domains: ['oilwcbfyhutzyjzlqbuk.supabase.co'],
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: '*.supabase.co',
+        hostname: 's3.ru1.storage.beget.cloud',
         port: '',
-        pathname: '/storage/v1/object/public/**',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.beget.cloud',
+        port: '',
+        pathname: '/**',
       },
     ],
   },

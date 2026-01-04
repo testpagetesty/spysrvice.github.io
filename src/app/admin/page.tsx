@@ -694,62 +694,65 @@ export default function AdminPage() {
       const result = await response.json()
 
       if (response.ok && result.creative) {
-        // Fetch the updated creative with all relations to ensure we have complete data
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-        
-        if (supabaseUrl && supabaseKey) {
-          try {
-            // Fetch the updated creative with all relations
-            const creativeWithRelationsUrl = `${supabaseUrl}/rest/v1/creatives?id=eq.${selectedCreative.id}&select=*,formats(name,code),types(name,code),placements(name,code),countries(name),platforms(name,code)`
-            const creativeRes = await fetch(creativeWithRelationsUrl, {
-              headers: { apikey: supabaseKey }
-            })
-            const creativeData = await creativeRes.json()
-            
-            if (creativeData && creativeData.length > 0) {
-              const fullUpdatedCreative = creativeData[0] as Creative
-              
-              // Update selectedCreative with fresh data from API
-              setSelectedCreative(fullUpdatedCreative)
-              
-              // Also update in the creatives list to keep them in sync
-              setCreatives(prevCreatives => 
-                prevCreatives.map(c => c.id === fullUpdatedCreative.id ? fullUpdatedCreative : c)
-              )
-            } else {
-              // Fallback: update with API response data and local mappings
-              const updatedCreative = { ...selectedCreative } as Creative
-              
-              // Update the field that was edited
-              if (fieldName === 'title') {
-                updatedCreative.title = fieldEditValue
-              } else if (fieldName === 'description') {
-                updatedCreative.description = fieldEditValue || undefined
-              } else if (fieldName === 'format') {
-                const format = formats.find(f => f.code === fieldEditValue)
-                if (format) updatedCreative.formats = { name: format.name, code: format.code }
-              } else if (fieldName === 'type') {
-                const type = types.find(t => t.code === fieldEditValue)
-                if (type) updatedCreative.types = { name: type.name, code: type.code }
-              } else if (fieldName === 'placement') {
-                const placement = placements.find(p => p.code === fieldEditValue)
-                if (placement) updatedCreative.placements = { name: placement.name, code: placement.code }
-              } else if (fieldName === 'country') {
-                updatedCreative.country_code = fieldEditValue
-                const country = countries.find(c => c.code === fieldEditValue)
-                if (country) updatedCreative.countries = { name: country.name }
-              } else if (fieldName === 'platform') {
-                const platform = platforms.find(p => p.code === fieldEditValue)
-                if (platform) updatedCreative.platforms = { name: platform.name, code: platform.code }
-              } else if (fieldName === 'cloaking') {
-                updatedCreative.cloaking = fieldEditValue === 'true'
+        // Обновляем список креативов через API
+        try {
+          // Загружаем обновленный креатив через API
+          const creativeRes = await fetch(`/api/admin/creatives?limit=100&status=all`)
+          if (creativeRes.ok) {
+            const creativeResult = await creativeRes.json()
+            if (creativeResult.success) {
+              const updatedCreative = creativeResult.creatives.find((c: any) => c.id === selectedCreative.id)
+              if (updatedCreative) {
+                const fullUpdatedCreative = {
+                  ...updatedCreative,
+                  formats: updatedCreative.formats || null,
+                  types: updatedCreative.types || null,
+                  placements: updatedCreative.placements || null,
+                  platforms: updatedCreative.platforms || null,
+                  countries: updatedCreative.countries || null
+                } as Creative
+                
+                // Update selectedCreative with fresh data from API
+                setSelectedCreative(fullUpdatedCreative)
+                
+                // Also update in the creatives list to keep them in sync
+                setCreatives(prevCreatives => 
+                  prevCreatives.map(c => c.id === fullUpdatedCreative.id ? fullUpdatedCreative : c)
+                )
+              } else {
+                // Fallback: update with API response data and local mappings
+                const updatedCreative = { ...selectedCreative, ...result.creative } as Creative
+                
+                // Update the field that was edited
+                if (fieldName === 'title') {
+                  updatedCreative.title = fieldEditValue
+                } else if (fieldName === 'description') {
+                  updatedCreative.description = fieldEditValue || undefined
+                } else if (fieldName === 'format') {
+                  const format = formats.find(f => f.code === fieldEditValue)
+                  if (format) updatedCreative.formats = { name: format.name, code: format.code }
+                } else if (fieldName === 'type') {
+                  const type = types.find(t => t.code === fieldEditValue)
+                  if (type) updatedCreative.types = { name: type.name, code: type.code }
+                } else if (fieldName === 'placement') {
+                  const placement = placements.find(p => p.code === fieldEditValue)
+                  if (placement) updatedCreative.placements = { name: placement.name, code: placement.code }
+                } else if (fieldName === 'country') {
+                  updatedCreative.country_code = fieldEditValue
+                  const country = countries.find(c => c.code === fieldEditValue)
+                  if (country) updatedCreative.countries = { name: country.name }
+                } else if (fieldName === 'platform') {
+                  const platform = platforms.find(p => p.code === fieldEditValue)
+                  if (platform) updatedCreative.platforms = { name: platform.name, code: platform.code }
+                } else if (fieldName === 'cloaking') {
+                  updatedCreative.cloaking = fieldEditValue === 'true'
+                }
+                
+                setSelectedCreative(updatedCreative)
+                setCreatives(prevCreatives => 
+                  prevCreatives.map(c => c.id === updatedCreative.id ? updatedCreative : c)
+                )
               }
-              
-              setSelectedCreative(updatedCreative)
-              setCreatives(prevCreatives => 
-                prevCreatives.map(c => c.id === updatedCreative.id ? updatedCreative : c)
-              )
             }
           } catch (error) {
             console.error('Error fetching updated creative:', error)
@@ -764,13 +767,11 @@ export default function AdminPage() {
           }
         } else {
           // Fallback: update local state only
-          const updatedCreative = { ...selectedCreative } as Creative
-          if (fieldName === 'title') {
-            updatedCreative.title = fieldEditValue
-          } else if (fieldName === 'description') {
-            updatedCreative.description = fieldEditValue || undefined
-          }
+          const updatedCreative = { ...selectedCreative, ...result.creative } as Creative
           setSelectedCreative(updatedCreative)
+          setCreatives(prevCreatives => 
+            prevCreatives.map(c => c.id === updatedCreative.id ? updatedCreative : c)
+          )
         }
         
         setEditingField(null)

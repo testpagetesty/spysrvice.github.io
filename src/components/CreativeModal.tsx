@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { X, Download, ExternalLink, Play } from 'lucide-react'
-import { type CreativeWithRelations } from '@/lib/supabase'
+import { type CreativeWithRelations } from '@/lib/types'
 import { formatDateTime, getMediaUrl } from '@/lib/utils'
 
 interface CreativeModalProps {

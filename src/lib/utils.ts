@@ -29,9 +29,10 @@ export function getMediaUrl(path?: string) {
   // If it's already a full URL, return as is
   if (path.startsWith('http')) return path
   
-  // Otherwise, construct Supabase storage URL
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  return `${supabaseUrl}/storage/v1/object/public/creatives-media/${path}`
+  // Otherwise, construct S3 storage URL
+  const s3PublicUrl = process.env.S3_PUBLIC_URL || process.env.NEXT_PUBLIC_API_URL || ''
+  const bucket = process.env.S3_BUCKET || 'creatives-media'
+  return `${s3PublicUrl}/${bucket}/${path}`
 }
 
 export function truncateText(text: string, maxLength: number) {

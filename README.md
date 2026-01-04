@@ -24,10 +24,11 @@
 
 ## 🛠️ Технологии
 
-- **Next.js 15** (App Router)
+- **Next.js 14** (App Router)
 - **TypeScript**
 - **Tailwind CSS**
-- **Supabase** (база данных + storage)
+- **PostgreSQL** (база данных)
+- **S3 Storage** (Beget S3 для файлов)
 - **Lucide React** (иконки)
 
 ## 📁 Структура проекта
@@ -36,6 +37,7 @@
 src/
 ├── app/
 │   ├── admin/          # Скрытая админ-панель
+│   ├── api/            # API routes
 │   ├── globals.css     # Глобальные стили
 │   ├── layout.tsx      # Основной лайаут
 │   └── page.tsx        # Главная страница
@@ -45,7 +47,9 @@ src/
 │   ├── CreativeModal.tsx # Модальное окно
 │   └── Filters.tsx     # Компонент фильтров
 └── lib/
-    ├── supabase.ts     # Клиент Supabase + типы
+    ├── db.ts           # PostgreSQL подключение
+    ├── storage.ts      # S3 Storage клиент
+    ├── types.ts        # TypeScript типы
     └── utils.ts        # Утилиты
 ```
 
@@ -57,7 +61,7 @@ npm install
 ```
 
 ### 2. Переменные окружения
-Файл `.env.local` уже настроен с ключами Supabase.
+Создайте файл `.env.production` с настройками PostgreSQL и S3 (см. `.env.example`).
 
 ### 3. Запуск
 ```bash
@@ -68,13 +72,17 @@ npm run dev
 
 ## 📊 База данных
 
-Подключается к Supabase с таблицами:
+PostgreSQL с таблицами:
 - `creatives` - основная таблица креативов
 - `formats` - форматы (teaser, video, banner, image)
 - `types` - типы/вертикали (crypt, gambling, nutra, etc.)
 - `placements` - размещения (demand_gen, uac, youtube_ads, etc.)
 - `platforms` - платформы (web, google, youtube, facebook, etc.)
 - `countries` - страны (код ISO + название)
+- `dashboard_settings` - настройки дашборда
+- `ad_settings` - настройки рекламы
+
+Файлы хранятся в S3 Storage (Beget S3).
 
 ## 🎨 Дизайн
 
@@ -97,41 +105,42 @@ npm run dev
 
 ## 🚀 Деплой
 
-### GitHub + Vercel
-1. Создать репозиторий на GitHub
-2. Загрузить код: `git push origin main`
-3. Подключить к Vercel
-4. Добавить переменные окружения в Vercel
-5. Автодеплой готов!
+### Beget VPS
+1. Установите Node.js, PostgreSQL, PM2
+2. Создайте базу данных PostgreSQL
+3. Выполните `database_schema.sql`
+4. Настройте S3 Storage (Beget S3)
+5. Создайте `.env.production` с настройками
+6. Соберите проект: `npm run build`
+7. Запустите через PM2: `pm2 start ecosystem.config.js`
 
-### Переменные для Vercel
-```
-NEXT_PUBLIC_SUPABASE_URL=https://oilwcbfyhutzyjzlqbuk.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
+Подробная инструкция в `DEPLOY_INSTRUCTIONS.md` и `QUICK_DEPLOY.md`
 
 ## 📱 API для мобильных приложений
 
-Используйте Supabase REST API:
+Используйте REST API endpoints:
 ```
-POST /rest/v1/creatives
-GET  /rest/v1/formats
-GET  /rest/v1/types
-GET  /rest/v1/countries
+POST /api/creatives          # Создание креатива
+GET  /api/creatives          # Получение креативов
+GET  /api/references/formats # Справочник форматов
+GET  /api/references/types   # Справочник типов
+GET  /api/references/countries # Справочник стран
 ```
 
 Пример загрузки креатива:
 ```javascript
-const { data, error } = await supabase
-  .from('creatives')
-  .insert({
-    title: 'Casino Ad',
-    format_id: 'uuid-format',
-    type_id: 'uuid-type',
-    country_code: 'DE',
-    platform_id: 'uuid-platform',
-    media_url: 'path/to/image.jpg'
-  })
+const formData = new FormData()
+formData.append('title', 'Casino Ad')
+formData.append('format', 'teaser')
+formData.append('type', 'gambling')
+formData.append('country', 'DE')
+formData.append('platform', 'youtube')
+formData.append('media_file', file)
+
+const response = await fetch('https://profitlabspy.com/api/creatives', {
+  method: 'POST',
+  body: formData
+})
 ```
 
 ## 🔄 Следующие шаги

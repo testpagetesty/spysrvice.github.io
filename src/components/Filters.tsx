@@ -3,18 +3,13 @@
 import { useState, useEffect } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { 
-  getFormats, 
-  getTypes, 
-  getPlacements, 
-  getPlatforms, 
-  getCountriesWithCounts,
   type Format,
   type Type,
   type Placement,
   type Platform,
   type Country,
   type Filters as FilterType
-} from '@/lib/supabase'
+} from '@/lib/types'
 
 interface FiltersProps {
   onFiltersChange: (filters: FilterType) => void

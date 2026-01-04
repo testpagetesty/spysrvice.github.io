@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import { useState } from 'react'
 import { Play, ExternalLink, Download } from 'lucide-react'
-import { type CreativeWithRelations } from '@/lib/supabase'
+import { type CreativeWithRelations } from '@/lib/types'
 import { formatDate, getMediaUrl, truncateText } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
