@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { query } from '@/lib/db'
+import { uploadFile, deleteFile } from '@/lib/storage'
 import { getErrorMessage } from '@/lib/utils'
 
 export async function POST(request: NextRequest) {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json({ error: 'Supabase не настроен на сервере' }, { status: 500 })
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
     const formData = await request.formData()
 
     const creativeId = formData.get('creative_id') as string
@@ -30,7 +23,6 @@ export async function POST(request: NextRequest) {
 
     const mediaFile = formData.get('media_file') as File | null
     const thumbnailFile = formData.get('thumbnail_file') as File | null
-    // zipFile больше не обрабатываем - все файлы страниц загружаются напрямую в Supabase Storage
     const deleteFileType = formData.get('delete_file_type') as string | null
 
     console.log('Update creative - received files:', {
@@ -38,47 +30,82 @@ export async function POST(request: NextRequest) {
       hasThumbnailFile: !!thumbnailFile
     })
 
-    // Fetch current creative to determine status for moderation reset
-    const { data: existingCreative, error: fetchError } = await supabase
-      .from('creatives')
-      .select('status, moderated_at, moderated_by')
-      .eq('id', creativeId)
-      .single()
+    // Получаем текущий креатив из PostgreSQL
+    const { rows: existingRows } = await query(
+      'SELECT status, moderated_at, moderated_by, media_url, thumbnail_url, download_url FROM creatives WHERE id = $1',
+      [creativeId]
+    )
 
-    if (fetchError) {
-      console.error('Failed to fetch existing creative:', fetchError)
+    if (existingRows.length === 0) {
+      return NextResponse.json({ error: 'Креатив не найден' }, { status: 404 })
     }
+
+    const existingCreative = existingRows[0]
 
     // Handle file deletion
     if (deleteFileType) {
-      const updateData: any = {}
-      if (deleteFileType === 'media') updateData.media_url = null
-      if (deleteFileType === 'thumbnail') updateData.thumbnail_url = null
-      if (deleteFileType === 'download') updateData.download_url = null
+      const updateFields: string[] = []
+      const updateValues: any[] = []
+      let paramIndex = 1
 
-      const { data: updatedCreative, error: updateError } = await supabase
-        .from('creatives')
-        .update(updateData)
-        .eq('id', creativeId)
-        .select()
-        .single()
-
-      if (updateError) {
-        return NextResponse.json({ error: 'Ошибка при удалении файла', details: updateError.message }, { status: 500 })
+      if (deleteFileType === 'media') {
+        updateFields.push(`media_url = $${paramIndex++}`)
+        updateValues.push(null)
+        // Удаляем файл из S3
+        if (existingCreative.media_url) {
+          try {
+            const filePath = existingCreative.media_url.split('/').slice(-1)[0]
+            await deleteFile(filePath)
+          } catch (e) {
+            console.error('Error deleting media file from S3:', e)
+          }
+        }
       }
+      if (deleteFileType === 'thumbnail') {
+        updateFields.push(`thumbnail_url = $${paramIndex++}`)
+        updateValues.push(null)
+        // Удаляем файл из S3
+        if (existingCreative.thumbnail_url) {
+          try {
+            const filePath = existingCreative.thumbnail_url.split('/').slice(-1)[0]
+            await deleteFile(`thumbs/${filePath}`)
+          } catch (e) {
+            console.error('Error deleting thumbnail file from S3:', e)
+          }
+        }
+      }
+      if (deleteFileType === 'download') {
+        updateFields.push(`download_url = $${paramIndex++}`)
+        updateValues.push(null)
+        // Удаляем файл из S3 если нужно
+        if (existingCreative.download_url) {
+          try {
+            const filePath = existingCreative.download_url.split('/').slice(-1)[0]
+            await deleteFile(filePath)
+          } catch (e) {
+            console.error('Error deleting download file from S3:', e)
+          }
+        }
+      }
+
+      updateValues.push(creativeId)
+      const { rows } = await query(
+        `UPDATE creatives SET ${updateFields.join(', ')}, updated_at = NOW() WHERE id = $${paramIndex} RETURNING *`,
+        updateValues
+      )
 
       return NextResponse.json({ 
         message: 'Файл успешно удален', 
-        creative: updatedCreative 
+        creative: rows[0] 
       }, { status: 200 })
     }
 
     // Get IDs for reference tables
     const [formatRes, typeRes, placementRes, platformRes] = await Promise.all([
-      formatCode ? supabase.from('formats').select('id').eq('code', formatCode).single() : Promise.resolve({ data: null, error: null }),
-      typeCode ? supabase.from('types').select('id').eq('code', typeCode).single() : Promise.resolve({ data: null, error: null }),
-      placementCode ? supabase.from('placements').select('id').eq('code', placementCode).single() : Promise.resolve({ data: null, error: null }),
-      platformCode ? supabase.from('platforms').select('id').eq('code', platformCode).single() : Promise.resolve({ data: null, error: null })
+      formatCode ? query('SELECT id FROM formats WHERE code = $1', [formatCode]) : Promise.resolve({ rows: [], rowCount: 0 }),
+      typeCode ? query('SELECT id FROM types WHERE code = $1', [typeCode]) : Promise.resolve({ rows: [], rowCount: 0 }),
+      placementCode ? query('SELECT id FROM placements WHERE code = $1', [placementCode]) : Promise.resolve({ rows: [], rowCount: 0 }),
+      platformCode ? query('SELECT id FROM platforms WHERE code = $1', [platformCode]) : Promise.resolve({ rows: [], rowCount: 0 }),
     ])
 
     // Upload files if provided, otherwise keep current URLs
@@ -93,11 +120,9 @@ export async function POST(request: NextRequest) {
         type: mediaFile.type
       })
       
-      // Очищаем имя файла от специальных символов
       const sanitizedFileName = mediaFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
       const mediaFileName = `${Date.now()}-${sanitizedFileName}`
       
-      // Определяем content-type
       let contentType = mediaFile.type
       if (!contentType) {
         const ext = mediaFile.name.toLowerCase().split('.').pop()
@@ -113,17 +138,11 @@ export async function POST(request: NextRequest) {
         contentType = mimeTypes[ext || ''] || 'application/octet-stream'
       }
       
-      const { error: uploadError } = await supabase.storage.from('creatives-media').upload(mediaFileName, mediaFile, {
-        contentType,
-        cacheControl: '3600',
-        upsert: false
-      })
-      if (uploadError) {
-        console.error('Media upload error:', uploadError)
-      } else {
+      try {
+        mediaUrl = await uploadFile(mediaFile, mediaFileName, contentType)
         console.log('Media uploaded successfully for update')
-        const { data } = supabase.storage.from('creatives-media').getPublicUrl(mediaFileName)
-        mediaUrl = data.publicUrl
+      } catch (uploadError) {
+        console.error('Media upload error:', uploadError)
       }
     }
 
@@ -134,11 +153,9 @@ export async function POST(request: NextRequest) {
         type: thumbnailFile.type
       })
       
-      // Очищаем имя файла от специальных символов
       const sanitizedFileName = thumbnailFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
       const thumbFileName = `thumbs/${Date.now()}-${sanitizedFileName}`
       
-      // Определяем content-type для изображений
       let contentType = thumbnailFile.type
       if (!contentType) {
         const ext = thumbnailFile.name.toLowerCase().split('.').pop()
@@ -150,90 +167,112 @@ export async function POST(request: NextRequest) {
         contentType = imageMimeTypes[ext || ''] || 'image/jpeg'
       }
       
-      const { error: uploadError } = await supabase.storage.from('creatives-media').upload(thumbFileName, thumbnailFile, {
-        contentType,
-        cacheControl: '3600',
-        upsert: false
-      })
-      if (uploadError) {
-        console.error('Thumbnail upload error:', uploadError)
-      } else {
+      try {
+        thumbnailUrl = await uploadFile(thumbnailFile, thumbFileName, contentType)
         console.log('Thumbnail uploaded successfully for update')
-        const { data } = supabase.storage.from('creatives-media').getPublicUrl(thumbFileName)
-        thumbnailUrl = data.publicUrl
+      } catch (uploadError) {
+        console.error('Thumbnail upload error:', uploadError)
       }
     }
 
-    // Файлы архивов страниц загружаются напрямую в Supabase Storage
-    // download_url обновляется только через deleteFileType или остается текущим значением
     if (deleteFileType === 'download') {
       downloadUrl = null
       console.log('Download URL will be deleted')
-    } else {
-      console.log('Keeping current download_url:', downloadUrl)
     }
 
     // Prepare update data
-    const updateData: any = {
-      title,
-      description: description || null,
-      cloaking,
-      landing_url: landingUrl || null,
-      source_link: sourceLink || null,
-      source_device: sourceDevice || null,
-      media_url: mediaUrl,
-      thumbnail_url: thumbnailUrl,
-      download_url: downloadUrl
+    const updateFields: string[] = []
+    const updateValues: any[] = []
+    let paramIndex = 1
+
+    updateFields.push(`title = $${paramIndex++}`)
+    updateValues.push(title)
+
+    updateFields.push(`description = $${paramIndex++}`)
+    updateValues.push(description || null)
+
+    updateFields.push(`cloaking = $${paramIndex++}`)
+    updateValues.push(cloaking)
+
+    updateFields.push(`landing_url = $${paramIndex++}`)
+    updateValues.push(landingUrl || null)
+
+    updateFields.push(`source_link = $${paramIndex++}`)
+    updateValues.push(sourceLink || null)
+
+    updateFields.push(`source_device = $${paramIndex++}`)
+    updateValues.push(sourceDevice || null)
+
+    updateFields.push(`media_url = $${paramIndex++}`)
+    updateValues.push(mediaUrl)
+
+    updateFields.push(`thumbnail_url = $${paramIndex++}`)
+    updateValues.push(thumbnailUrl)
+
+    updateFields.push(`download_url = $${paramIndex++}`)
+    updateValues.push(downloadUrl)
+
+    if (formatRes.rows.length > 0) {
+      updateFields.push(`format_id = $${paramIndex++}`)
+      updateValues.push(formatRes.rows[0].id)
     }
 
-    // Если креатив был опубликован, переводим его обратно в статус new/draft
+    if (typeRes.rows.length > 0) {
+      updateFields.push(`type_id = $${paramIndex++}`)
+      updateValues.push(typeRes.rows[0].id)
+    }
+
+    if (placementRes.rows.length > 0) {
+      updateFields.push(`placement_id = $${paramIndex++}`)
+      updateValues.push(placementRes.rows[0].id)
+    }
+
+    if (platformRes.rows.length > 0) {
+      updateFields.push(`platform_id = $${paramIndex++}`)
+      updateValues.push(platformRes.rows[0].id)
+    }
+
+    if (countryCode) {
+      updateFields.push(`country_code = $${paramIndex++}`)
+      updateValues.push(countryCode)
+    }
+
+    // Если креатив был опубликован, переводим его обратно в статус draft
     if (!existingCreative || existingCreative.status === 'published') {
-      updateData.status = 'draft'
-      updateData.moderated_at = null
-      updateData.moderated_by = null
+      updateFields.push(`status = $${paramIndex++}`)
+      updateValues.push('draft')
+      updateFields.push(`moderated_at = $${paramIndex++}`)
+      updateValues.push(null)
+      updateFields.push(`moderated_by = $${paramIndex++}`)
+      updateValues.push(null)
       console.log('Creative status will be reset to draft after update')
     }
 
-    // Add captured_at if provided (already in ISO format from client)
+    // Add captured_at if provided
     if (capturedAt && capturedAt.trim() !== '') {
-      // Date comes in ISO format: "2025-11-11T18:34:00.000Z"
-      // Save it as is (same format as DB)
-      updateData.captured_at = capturedAt.trim()
-      console.log('Saving captured_at:', updateData.captured_at)
+      updateFields.push(`captured_at = $${paramIndex++}`)
+      updateValues.push(capturedAt.trim())
+      console.log('Saving captured_at:', capturedAt.trim())
     }
 
-    if (formatRes.data) updateData.format_id = formatRes.data.id
-    if (typeRes.data) updateData.type_id = typeRes.data.id
-    if (placementRes.data) updateData.placement_id = placementRes.data.id
-    if (platformRes.data) updateData.platform_id = platformRes.data.id
-    if (countryCode) updateData.country_code = countryCode
-
-    console.log('Updating creative with data:', {
-      id: creativeId,
-      title,
-      download_url: downloadUrl,
-      media_url: mediaUrl,
-      thumbnail_url: thumbnailUrl,
-      hasDownloadUrl: !!downloadUrl,
-      newStatus: updateData.status || existingCreative?.status || 'draft'
-    })
+    updateValues.push(creativeId)
 
     // Update creative
-    const { data: updatedCreative, error: updateError } = await supabase
-      .from('creatives')
-      .update(updateData)
-      .eq('id', creativeId)
-      .select()
-      .single()
+    const { rows } = await query(
+      `UPDATE creatives 
+       SET ${updateFields.join(', ')}, updated_at = NOW() 
+       WHERE id = $${paramIndex} 
+       RETURNING *`,
+      updateValues
+    )
 
-    if (updateError) {
-      console.error('Update error:', updateError)
-      return NextResponse.json({ error: 'Ошибка при обновлении креатива', details: getErrorMessage(updateError) }, { status: 500 })
+    if (rows.length === 0) {
+      return NextResponse.json({ error: 'Ошибка при обновлении креатива' }, { status: 500 })
     }
 
     return NextResponse.json({ 
       message: 'Креатив успешно обновлен!', 
-      creative: updatedCreative 
+      creative: rows[0] 
     }, { status: 200 })
 
   } catch (error) {

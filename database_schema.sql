@@ -1,5 +1,5 @@
 -- Создание таблиц для spy service
--- Выполнить в SQL Editor в Supabase
+-- Выполнить в PostgreSQL на сервере Beget
 
 -- Справочник форматов
 CREATE TABLE IF NOT EXISTS formats (
@@ -180,3 +180,32 @@ INSERT INTO countries (code, name) VALUES
     ('SA', 'Saudi Arabia'),
     ('HK', 'Hong Kong')
 ON CONFLICT (code) DO NOTHING;
+
+-- Таблица настроек дашборда
+CREATE TABLE IF NOT EXISTS dashboard_settings (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now())
+);
+
+-- Таблица настроек рекламы
+CREATE TABLE IF NOT EXISTS ad_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    position TEXT UNIQUE NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT,
+    enabled BOOLEAN DEFAULT TRUE,
+    content TEXT,
+    image_url TEXT,
+    link_url TEXT,
+    width TEXT DEFAULT 'auto',
+    height TEXT DEFAULT 'auto',
+    priority INTEGER DEFAULT 0,
+    display_conditions JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now())
+);
+
+-- Индекс для ad_settings
+CREATE INDEX IF NOT EXISTS ad_settings_position_idx ON ad_settings (position);
+CREATE INDEX IF NOT EXISTS ad_settings_enabled_idx ON ad_settings (enabled);

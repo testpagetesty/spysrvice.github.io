@@ -726,42 +726,40 @@ export default function HomePage() {
 
   const loadData = async () => {
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-      
-      if (!supabaseUrl || !supabaseKey) {
-        console.log('Supabase not configured, using demo data')
-        loadDemoData()
-        return
-      }
-
-      // Загружаем справочники
+      // Загружаем справочники через новые API endpoints
       const [formatsRes, typesRes, placementsRes, platformsRes, countriesRes] = await Promise.all([
-        fetch(`${supabaseUrl}/rest/v1/formats`, { headers: { apikey: supabaseKey } }),
-        fetch(`${supabaseUrl}/rest/v1/types`, { headers: { apikey: supabaseKey } }),
-        fetch(`${supabaseUrl}/rest/v1/placements`, { headers: { apikey: supabaseKey } }),
-        fetch(`${supabaseUrl}/rest/v1/platforms`, { headers: { apikey: supabaseKey } }),
-        fetch(`${supabaseUrl}/rest/v1/countries`, { headers: { apikey: supabaseKey } })
+        fetch('/api/references/formats'),
+        fetch('/api/references/types'),
+        fetch('/api/references/placements'),
+        fetch('/api/references/platforms'),
+        fetch('/api/references/countries?withCounts=true')
       ])
 
       if (formatsRes.ok) {
-        const data = (await formatsRes.json()) as FilterOption[]
-        setFormats(data.filter(item => ALLOWED_FORMAT_CODES.includes(item.code)))
+        const result = await formatsRes.json()
+        const data = result.data || []
+        setFormats(data.filter((item: FilterOption) => ALLOWED_FORMAT_CODES.includes(item.code)))
       }
       if (typesRes.ok) {
-        const data = (await typesRes.json()) as FilterOption[]
-        setTypes(data.filter(item => ALLOWED_TYPE_CODES.includes(item.code)))
+        const result = await typesRes.json()
+        const data = result.data || []
+        setTypes(data.filter((item: FilterOption) => ALLOWED_TYPE_CODES.includes(item.code)))
       }
       if (placementsRes.ok) {
-        const data = (await placementsRes.json()) as FilterOption[]
-        setPlacements(data.filter(item => ALLOWED_PLACEMENT_CODES.includes(item.code)))
+        const result = await placementsRes.json()
+        const data = result.data || []
+        setPlacements(data.filter((item: FilterOption) => ALLOWED_PLACEMENT_CODES.includes(item.code)))
       }
       if (platformsRes.ok) {
-        const data = (await platformsRes.json()) as FilterOption[]
+        const result = await platformsRes.json()
+        const data = result.data || []
         // Показываем все платформы из базы данных без фильтрации
         setPlatforms(data)
       }
-      if (countriesRes.ok) setCountries(await countriesRes.json())
+      if (countriesRes.ok) {
+        const result = await countriesRes.json()
+        setCountries(result.data || [])
+      }
 
       // Загружаем креативы через API с пагинацией
       await loadDataWithFilters(1)

@@ -1,30 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { query } from '@/lib/db'
 import { getErrorMessage } from '@/lib/utils'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
 // GET - получить все настройки рекламы
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-    
-    const { data, error } = await supabase
-      .from('ad_settings')
-      .select('*')
-      .order('priority', { ascending: false })
-      .order('position', { ascending: true })
+    const { rows } = await query(`
+      SELECT * FROM ad_settings 
+      ORDER BY priority DESC, position ASC
+    `)
 
-    if (error) {
-      console.error('Supabase error:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch ad settings', details: getErrorMessage(error) },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ settings: data || [] })
+    return NextResponse.json({ settings: rows || [] })
 
   } catch (error) {
     console.error('Get ads error:', error)
@@ -38,8 +24,6 @@ export async function GET(request: NextRequest) {
 // POST - создать или обновить настройки рекламы
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-    
     const body = await request.json()
     const { position, type, title, enabled, content, image_url, link_url, width, height, priority, display_conditions } = body
 
@@ -51,72 +35,67 @@ export async function POST(request: NextRequest) {
     }
 
     // Проверяем существует ли уже настройка для этой позиции
-    const { data: existing } = await supabase
-      .from('ad_settings')
-      .select('id')
-      .eq('position', position)
-      .single()
+    const { rows: existing } = await query(
+      'SELECT id FROM ad_settings WHERE position = $1',
+      [position]
+    )
 
     let result
-    if (existing) {
+    if (existing && existing.length > 0) {
       // Обновляем существующую
-      const { data, error } = await supabase
-        .from('ad_settings')
-        .update({
+      const { rows } = await query(
+        `UPDATE ad_settings 
+         SET type = $1,
+             title = $2,
+             enabled = $3,
+             content = $4,
+             image_url = $5,
+             link_url = $6,
+             width = $7,
+             height = $8,
+             priority = $9,
+             display_conditions = $10,
+             updated_at = NOW()
+         WHERE position = $11
+         RETURNING *`,
+        [
           type,
-          title: title || null,
-          enabled: enabled !== undefined ? enabled : true,
-          content: content || null,
-          image_url: image_url || null,
-          link_url: link_url || null,
-          width: width || 'auto',
-          height: height || 'auto',
-          priority: priority || 0,
-          display_conditions: display_conditions || null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('position', position)
-        .select()
-        .single()
-
-      if (error) {
-        console.error('Update error:', error)
-        return NextResponse.json(
-          { error: 'Failed to update ad settings', details: getErrorMessage(error) },
-          { status: 500 }
-        )
-      }
-
-      result = data
+          title || null,
+          enabled !== undefined ? enabled : true,
+          content || null,
+          image_url || null,
+          link_url || null,
+          width || 'auto',
+          height || 'auto',
+          priority || 0,
+          display_conditions || null,
+          position
+        ]
+      )
+      result = rows[0]
     } else {
       // Создаем новую
-      const { data, error } = await supabase
-        .from('ad_settings')
-        .insert({
+      const { rows } = await query(
+        `INSERT INTO ad_settings (
+          position, type, title, enabled, content, image_url, link_url, 
+          width, height, priority, display_conditions
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING *`,
+        [
           position,
           type,
-          title: title || null,
-          enabled: enabled !== undefined ? enabled : true,
-          content: content || null,
-          image_url: image_url || null,
-          link_url: link_url || null,
-          width: width || 'auto',
-          height: height || 'auto',
-          priority: priority || 0,
-          display_conditions: display_conditions || null
-        })
-        .select()
-        .single()
-
-      if (error) {
-        console.error('Insert error:', error)
-        return NextResponse.json(
-          { error: 'Failed to create ad settings', details: getErrorMessage(error) },
-          { status: 500 }
-        )
-      }
-
-      result = data
+          title || null,
+          enabled !== undefined ? enabled : true,
+          content || null,
+          image_url || null,
+          link_url || null,
+          width || 'auto',
+          height || 'auto',
+          priority || 0,
+          display_conditions || null
+        ]
+      )
+      result = rows[0]
     }
 
     return NextResponse.json({
@@ -136,8 +115,6 @@ export async function POST(request: NextRequest) {
 // DELETE - удалить настройки рекламы
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-    
     const { searchParams } = new URL(request.url)
     const position = searchParams.get('position')
 
@@ -148,18 +125,7 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    const { error } = await supabase
-      .from('ad_settings')
-      .delete()
-      .eq('position', position)
-
-    if (error) {
-      console.error('Delete error:', error)
-      return NextResponse.json(
-        { error: 'Failed to delete ad settings', details: getErrorMessage(error) },
-        { status: 500 }
-      )
-    }
+    await query('DELETE FROM ad_settings WHERE position = $1', [position])
 
     return NextResponse.json({ success: true })
 

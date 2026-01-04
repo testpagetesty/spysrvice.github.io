@@ -1233,37 +1233,19 @@ export default function AdminPage() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-      
-      if (!supabaseUrl || !supabaseKey) {
-        loadDemoData()
-        return
-      }
-
       // Load moderation statistics
       await loadModerationStats()
 
-      // Load reference data
+      // Load reference data через новые API endpoints
       const [formatsRes, typesRes, placementsRes, platformsRes, countriesRes] = await Promise.all([
-        fetch(`${supabaseUrl}/rest/v1/formats?select=id,code,name&order=name`, {
-          headers: { apikey: supabaseKey }
-        }),
-        fetch(`${supabaseUrl}/rest/v1/types?select=id,code,name&order=name`, {
-          headers: { apikey: supabaseKey }
-        }),
-        fetch(`${supabaseUrl}/rest/v1/placements?select=id,code,name&order=name`, {
-          headers: { apikey: supabaseKey }
-        }),
-        fetch(`${supabaseUrl}/rest/v1/platforms?select=id,code,name&order=name`, {
-          headers: { apikey: supabaseKey }
-        }),
-        fetch(`${supabaseUrl}/rest/v1/countries?select=code,name&order=name`, {
-          headers: { apikey: supabaseKey }
-        })
+        fetch('/api/references/formats'),
+        fetch('/api/references/types'),
+        fetch('/api/references/placements'),
+        fetch('/api/references/platforms'),
+        fetch('/api/references/countries')
       ])
 
-      const [formatsData, typesData, placementsData, platformsData, countriesData] = await Promise.all([
+      const [formatsResult, typesResult, placementsResult, platformsResult, countriesResult] = await Promise.all([
         formatsRes.json(),
         typesRes.json(),
         placementsRes.json(),
@@ -1272,6 +1254,12 @@ export default function AdminPage() {
       ])
 
       // Filter allowed options (только для formats, types, placements)
+      const formatsData = formatsResult.data || []
+      const typesData = typesResult.data || []
+      const placementsData = placementsResult.data || []
+      const platformsData = platformsResult.data || []
+      const countriesData = countriesResult.data || []
+
       setFormats(formatsData.filter((f: FilterOption) => ALLOWED_FORMAT_CODES.includes(f.code)))
       setTypes(typesData.filter((t: FilterOption) => ALLOWED_TYPE_CODES.includes(t.code)))
       setPlacements(placementsData.filter((p: FilterOption) => ALLOWED_PLACEMENT_CODES.includes(p.code)))
@@ -1279,14 +1267,27 @@ export default function AdminPage() {
       setPlatforms(platformsData)
       setCountries(countriesData.map((c: any) => ({ id: c.code, code: c.code, name: c.name })))
 
-      // Load creatives (will be filtered by applyFilters)
-      const creativesUrl = `${supabaseUrl}/rest/v1/creatives?select=*,formats(name,code),types(name,code),placements(name,code),countries(name),platforms(name,code)&order=created_at.desc&limit=100`
-      
-      const creativesRes = await fetch(creativesUrl, {
-        headers: { apikey: supabaseKey }
-      })
-      const creativesData = await creativesRes.json()
-      setCreatives(creativesData)
+      // Load creatives через новый API endpoint
+      const creativesRes = await fetch('/api/creatives?page=1&limit=100')
+      if (creativesRes.ok) {
+        const creativesResult = await creativesRes.json()
+        if (creativesResult.success) {
+          // Преобразуем формат данных для совместимости
+          const formattedCreatives = creativesResult.creatives.map((c: any) => ({
+            ...c,
+            formats: c.format ? { name: c.format.name, code: c.format.code } : null,
+            types: c.type ? { name: c.type.name, code: c.type.code } : null,
+            placements: c.placement ? { name: c.placement.name, code: c.placement.code } : null,
+            platforms: c.platform ? { name: c.platform.name, code: c.platform.code } : null,
+            countries: c.country ? { name: c.country.name } : null
+          }))
+          setCreatives(formattedCreatives)
+        } else {
+          setCreatives([])
+        }
+      } else {
+        setCreatives([])
+      }
       
       // Apply current filters after loading
       setTimeout(() => applyFilters(), 100)

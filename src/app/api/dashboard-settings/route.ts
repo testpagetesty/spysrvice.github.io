@@ -1,39 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { query } from '@/lib/db'
 import { getErrorMessage } from '@/lib/utils'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
 // GET - получить настройки дашборда
 export async function GET(request: NextRequest) {
   try {
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json(
-        { error: 'Supabase не настроен' },
-        { status: 500 }
-      )
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
-    // Получаем все настройки
-    const { data, error } = await supabase
-      .from('dashboard_settings')
-      .select('key, value')
-
-    if (error) {
-      console.error('Supabase error:', error)
-      return NextResponse.json(
-        { error: 'Failed to fetch dashboard settings', details: getErrorMessage(error) },
-        { status: 500 }
-      )
-    }
+    // Получаем все настройки из PostgreSQL
+    const { rows } = await query('SELECT key, value FROM dashboard_settings')
 
     // Преобразуем массив в объект
     const settings: Record<string, any> = {}
-    if (data) {
-      data.forEach(item => {
+    if (rows) {
+      rows.forEach((item: any) => {
         settings[item.key] = item.value
       })
     }
@@ -52,14 +30,6 @@ export async function GET(request: NextRequest) {
 // POST - обновить настройки дашборда
 export async function POST(request: NextRequest) {
   try {
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json(
-        { error: 'Supabase не настроен' },
-        { status: 500 }
-      )
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
     const body = await request.json()
     const { key, value } = body
 
@@ -70,30 +40,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Используем UPSERT для создания или обновления
-    const { data, error } = await supabase
-      .from('dashboard_settings')
-      .upsert({
-        key,
-        value,
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'key'
-      })
-      .select()
-      .single()
-
-    if (error) {
-      console.error('Supabase error:', error)
-      return NextResponse.json(
-        { error: 'Failed to save dashboard settings', details: getErrorMessage(error) },
-        { status: 500 }
-      )
-    }
+    // Используем UPSERT для создания или обновления в PostgreSQL
+    const { rows } = await query(
+      `INSERT INTO dashboard_settings (key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) 
+       DO UPDATE SET value = $2, updated_at = NOW()
+       RETURNING *`,
+      [key, value]
+    )
 
     return NextResponse.json({ 
       success: true, 
-      settings: data 
+      settings: rows[0] 
     })
 
   } catch (error) {

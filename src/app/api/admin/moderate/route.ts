@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { query } from '@/lib/db'
 import { getErrorMessage } from '@/lib/utils'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-    
     const body = await request.json()
     const { action, creativeIds, moderatedBy = 'admin' } = body
 
@@ -42,32 +37,25 @@ export async function POST(request: NextRequest) {
         )
     }
 
-    // Обновляем статус креативов
-    const { data, error } = await supabase
-      .from('creatives')
-      .update({
-        status: newStatus,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatedBy,
-        updated_at: new Date().toISOString()
-      })
-      .in('id', creativeIds)
-      .select('id, title, status')
-
-    if (error) {
-      console.error('Supabase error:', error)
-      return NextResponse.json(
-        { error: 'Failed to update creatives', details: getErrorMessage(error) },
-        { status: 500 }
-      )
-    }
+    // Обновляем статус креативов в PostgreSQL
+    const placeholders = creativeIds.map((_, i) => `$${i + 1}`).join(',')
+    const { rows } = await query(
+      `UPDATE creatives 
+       SET status = $${creativeIds.length + 1},
+           moderated_at = $${creativeIds.length + 2},
+           moderated_by = $${creativeIds.length + 3},
+           updated_at = NOW()
+       WHERE id IN (${placeholders})
+       RETURNING id, title, status`,
+      [...creativeIds, newStatus, new Date().toISOString(), moderatedBy]
+    )
 
     return NextResponse.json({
       message: `Successfully ${action}ed ${creativeIds.length} creative(s)`,
       action,
       newStatus,
-      updatedCreatives: data,
-      count: data?.length || 0
+      updatedCreatives: rows,
+      count: rows?.length || 0
     })
 
   } catch (error) {
@@ -81,32 +69,27 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    // Получаем статистику по статусам из PostgreSQL
+    const { rows } = await query(`
+      SELECT status, COUNT(*) as count
+      FROM creatives
+      WHERE status IS NOT NULL
+      GROUP BY status
+    `)
+
+    const stats: Record<string, number> = {}
+    let total = 0
     
-    // Получаем статистику по статусам
-    const { data, error } = await supabase
-      .from('creatives')
-      .select('status')
-      .not('status', 'is', null)
-
-    if (error) {
-      return NextResponse.json(
-        { error: 'Failed to get statistics', details: getErrorMessage(error) },
-        { status: 500 }
-      )
-    }
-
-    // Подсчитываем статистику
-    const stats = data?.reduce((acc, creative) => {
-      acc[creative.status] = (acc[creative.status] || 0) + 1
-      return acc
-    }, {} as Record<string, number>) || {}
+    rows.forEach((row: any) => {
+      stats[row.status] = parseInt(row.count)
+      total += parseInt(row.count)
+    })
 
     return NextResponse.json({
       statistics: {
         draft: stats.draft || 0,
         published: stats.published || 0,
-        total: data?.length || 0
+        total
       }
     })
 

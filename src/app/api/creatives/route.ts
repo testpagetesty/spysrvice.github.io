@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { query } from '@/lib/db'
+import { uploadFile, getPublicUrl } from '@/lib/storage'
 import { getErrorMessage } from '@/lib/utils'
 
 // Для App Router лимиты настраиваются в next.config.js
@@ -34,35 +35,12 @@ export async function POST(request: NextRequest) {
   console.log('URL:', request.url)
   
   try {
-    // Проверяем размер запроса (Vercel лимит ~4.5MB для body)
+    // Проверяем размер запроса
     const contentLength = request.headers.get('content-length')
     if (contentLength) {
       const sizeMB = parseInt(contentLength) / (1024 * 1024)
       console.log(`Request size: ${sizeMB.toFixed(2)} MB`)
-      if (sizeMB > 4.5) {
-        console.warn(`⚠️ Request size (${sizeMB.toFixed(2)} MB) exceeds Vercel limit (4.5 MB)`)
-        // Не блокируем, но предупреждаем
-      }
     }
-    
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-    
-    if (!supabaseUrl || !supabaseServiceKey) {
-      console.error('❌ Missing Supabase credentials')
-      return NextResponse.json(
-        { 
-          success: false,
-          error: 'Server configuration error' 
-        },
-        { 
-          status: 500, 
-          headers: responseHeaders
-        }
-      )
-    }
-    
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     // Парсим formData с обработкой ошибок
     let formData: FormData
@@ -114,30 +92,26 @@ export async function POST(request: NextRequest) {
       downloadUrl: downloadUrl
     })
 
-    // Получаем ID справочников
+    // Получаем ID справочников из PostgreSQL
     const [formatRes, typeRes, placementRes, platformRes] = await Promise.all([
-      supabase.from('formats').select('id').eq('code', formatCode).single(),
-      supabase.from('types').select('id').eq('code', typeCode).single(),
-      supabase.from('placements').select('id').eq('code', placementCode).single(),
-      supabase.from('platforms').select('id').eq('code', platformCode).single()
+      formatCode ? query('SELECT id FROM formats WHERE code = $1', [formatCode]) : Promise.resolve({ rows: [], rowCount: 0 }),
+      typeCode ? query('SELECT id FROM types WHERE code = $1', [typeCode]) : Promise.resolve({ rows: [], rowCount: 0 }),
+      placementCode ? query('SELECT id FROM placements WHERE code = $1', [placementCode]) : Promise.resolve({ rows: [], rowCount: 0 }),
+      platformCode ? query('SELECT id FROM platforms WHERE code = $1', [platformCode]) : Promise.resolve({ rows: [], rowCount: 0 }),
     ])
 
-    if (formatRes.error || typeRes.error || placementRes.error || platformRes.error) {
-      console.error('Reference data errors:', {
-        format: formatRes.error,
-        type: typeRes.error,
-        placement: placementRes.error,
-        platform: platformRes.error
-      })
+    if (formatRes.rows.length === 0 || typeRes.rows.length === 0 || 
+        placementRes.rows.length === 0 || platformRes.rows.length === 0) {
+      console.error('Reference data errors: missing reference data')
       return NextResponse.json(
         { 
           success: false,
           error: 'Invalid reference data',
           details: {
-            format: formatRes.error?.message,
-            type: typeRes.error?.message,
-            placement: placementRes.error?.message,
-            platform: platformRes.error?.message
+            format: formatRes.rows.length === 0 ? 'Format not found' : null,
+            type: typeRes.rows.length === 0 ? 'Type not found' : null,
+            placement: placementRes.rows.length === 0 ? 'Placement not found' : null,
+            platform: platformRes.rows.length === 0 ? 'Platform not found' : null
           }
         }, 
         { 
@@ -150,10 +124,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Загружаем файлы в Storage
+    // Загружаем файлы в S3 Storage
     let mediaUrl = null
     let thumbnailUrl = null
-    let finalDownloadUrl: string | null = null // Используем другое имя чтобы не конфликтовать с параметром
+    let finalDownloadUrl: string | null = null
 
     if (mediaFile) {
       console.log('Uploading media file:', {
@@ -182,20 +156,11 @@ export async function POST(request: NextRequest) {
         contentType = mimeTypes[ext || ''] || 'application/octet-stream'
       }
       
-      const { data: mediaData, error: mediaError } = await supabase.storage
-        .from('creatives-media')
-        .upload(mediaFileName, mediaFile, {
-          contentType,
-          cacheControl: '3600',
-          upsert: false
-        })
-      
-      if (mediaError) {
+      try {
+        mediaUrl = await uploadFile(mediaFile, mediaFileName, contentType)
+        console.log('Media uploaded successfully:', mediaUrl)
+      } catch (mediaError) {
         console.error('Media upload error:', mediaError)
-      } else {
-        console.log('Media uploaded successfully:', mediaData)
-        const { data } = supabase.storage.from('creatives-media').getPublicUrl(mediaFileName)
-        mediaUrl = data.publicUrl
       }
     }
 
@@ -222,31 +187,22 @@ export async function POST(request: NextRequest) {
         contentType = imageMimeTypes[ext || ''] || 'image/jpeg'
       }
       
-      const { data: thumbData, error: thumbError } = await supabase.storage
-        .from('creatives-media')
-        .upload(thumbFileName, thumbnailFile, {
-          contentType,
-          cacheControl: '3600',
-          upsert: false
-        })
-      
-      if (thumbError) {
+      try {
+        thumbnailUrl = await uploadFile(thumbnailFile, thumbFileName, contentType)
+        console.log('Thumbnail uploaded successfully:', thumbnailUrl)
+      } catch (thumbError) {
         console.error('Thumbnail upload error:', thumbError)
-      } else {
-        console.log('Thumbnail uploaded successfully:', thumbData)
-        const { data } = supabase.storage.from('creatives-media').getPublicUrl(thumbFileName)
-        thumbnailUrl = data.publicUrl
       }
     }
 
-    // Файл архива страницы всегда загружается напрямую в Supabase Storage
-    // Мобильное приложение отправляет только URL файла из Supabase Storage
+    // Файл архива страницы загружается напрямую в S3 Storage
+    // Мобильное приложение отправляет только URL файла из S3 Storage
     if (downloadUrl) {
-      console.log('✅ Using download URL from Supabase Storage:', downloadUrl)
+      console.log('✅ Using download URL from S3 Storage:', downloadUrl)
       console.log('✅ Download URL length:', downloadUrl.length)
       finalDownloadUrl = downloadUrl
     } else {
-      console.warn('⚠️ No download URL provided - архив страницы должен быть загружен напрямую в Supabase Storage')
+      console.warn('⚠️ No download URL provided - архив страницы должен быть загружен напрямую в S3 Storage')
       finalDownloadUrl = null
     }
     
@@ -277,68 +233,39 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const insertData = {
-      title,
-      description,
-      format_id: formatRes.data.id,
-      type_id: typeRes.data.id,
-      placement_id: placementRes.data.id,
-      country_code: countryCode,
-      platform_id: platformRes.data.id,
-      cloaking,
-      media_url: mediaUrl,
-      thumbnail_url: thumbnailUrl,
-      landing_url: landingUrl,
-      source_link: sourceLink,
-      download_url: finalDownloadUrl,
-      source_device: sourceDevice || 'unknown',
-      captured_at: finalCapturedAt,
-      status: 'draft' // Новые креативы создаются как черновики
-    }
+    // Создаем запись в PostgreSQL
+    const insertResult = await query(
+      `INSERT INTO creatives (
+        title, description, format_id, type_id, placement_id, 
+        country_code, platform_id, cloaking, media_url, thumbnail_url,
+        landing_url, source_link, download_url, source_device,
+        captured_at, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      RETURNING *`,
+      [
+        title,
+        description || null,
+        formatRes.rows[0].id,
+        typeRes.rows[0].id,
+        placementRes.rows[0].id,
+        countryCode,
+        platformRes.rows[0].id,
+        cloaking,
+        mediaUrl,
+        thumbnailUrl,
+        landingUrl || null,
+        sourceLink || null,
+        finalDownloadUrl,
+        sourceDevice || 'unknown',
+        finalCapturedAt,
+        'draft'
+      ]
+    )
 
-    console.log('📝 Inserting creative with data:', {
-      title,
-      landing_url: landingUrl,
-      download_url: finalDownloadUrl,
-      download_url_length: finalDownloadUrl?.length || 0,
-      media_url: mediaUrl,
-      thumbnail_url: thumbnailUrl,
-      hasDownloadUrl: !!finalDownloadUrl,
-      formatCode,
-      typeCode,
-      platformCode
-    })
-    
-    console.log('📝 Full insertData:', JSON.stringify(insertData, null, 2))
+    const creative = insertResult.rows[0]
 
-    const { data: creative, error: insertError } = await supabase
-      .from('creatives')
-      .insert(insertData)
-      .select()
-      .single()
-
-    if (insertError) {
-      console.error('❌ Insert error:', insertError)
-      console.error('❌ Insert error details:', JSON.stringify(insertError, null, 2))
-      console.error('❌ Insert data that failed:', JSON.stringify(insertData, null, 2))
-      return NextResponse.json(
-        { 
-          success: false,
-          error: 'Failed to create creative', 
-          details: insertError.message,
-          code: insertError.code || 'UNKNOWN',
-          hint: insertError.hint || null
-        }, 
-        { 
-          status: 500, 
-          headers: responseHeaders
-        }
-      )
-    }
-    
-    // КРИТИЧНО: Проверяем что creative был создан
     if (!creative) {
-      console.error('❌ Creative is null after insert (no error returned)')
+      console.error('❌ Creative is null after insert')
       return NextResponse.json(
         {
           success: false,
@@ -441,18 +368,6 @@ export async function GET(request: NextRequest) {
   })
   
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-    
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return NextResponse.json({ 
-        message: 'Supabase not configured',
-        hasUrl: !!supabaseUrl,
-        hasKey: !!supabaseServiceKey
-      }, { headers: responseHeaders })
-    }
-    
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
     const searchParams = request.nextUrl.searchParams
     
     // Параметры пагинации
@@ -460,21 +375,27 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '30')
     const offset = (page - 1) * limit
     
-    // Создаем запрос
-    let query = supabase
-      .from('creatives')
-      .select(`
-        *,
-        formats(name, code),
-        types(name, code),
-        placements(name, code),
-        countries(name),
-        platforms(name, code)
-      `, { count: 'exact' })
-      .eq('status', 'published')
-      .order('captured_at', { ascending: false })
-      .range(offset, offset + limit - 1)
-    
+    // Базовый запрос
+    let queryText = `
+      SELECT 
+        c.*,
+        f.code as format_code, f.name as format_name,
+        t.code as type_code, t.name as type_name,
+        p.code as placement_code, p.name as placement_name,
+        pl.code as platform_code, pl.name as platform_name,
+        co.name as country_name
+      FROM creatives c
+      LEFT JOIN formats f ON c.format_id = f.id
+      LEFT JOIN types t ON c.type_id = t.id
+      LEFT JOIN placements p ON c.placement_id = p.id
+      LEFT JOIN platforms pl ON c.platform_id = pl.id
+      LEFT JOIN countries co ON c.country_code = co.code
+      WHERE c.status = 'published'
+    `
+
+    const queryParams: any[] = []
+    let paramIndex = 1
+
     // Применяем фильтры
     const dateFrom = searchParams.get('dateFrom')
     const dateTo = searchParams.get('dateTo')
@@ -484,51 +405,94 @@ export async function GET(request: NextRequest) {
     const country = searchParams.get('country')
     const platform = searchParams.get('platform')
     const cloaking = searchParams.get('cloaking')
-    
+
     if (dateFrom) {
-      query = query.gte('captured_at', `${dateFrom}T00:00:00`)
+      queryText += ` AND c.captured_at >= $${paramIndex}`
+      queryParams.push(`${dateFrom}T00:00:00`)
+      paramIndex++
     }
+
     if (dateTo) {
-      query = query.lte('captured_at', `${dateTo}T23:59:59`)
+      queryText += ` AND c.captured_at <= $${paramIndex}`
+      queryParams.push(`${dateTo}T23:59:59`)
+      paramIndex++
     }
+
     if (format) {
-      query = query.eq('formats.code', format)
+      queryText += ` AND f.code = $${paramIndex}`
+      queryParams.push(format)
+      paramIndex++
     }
+
     if (type) {
-      query = query.eq('types.code', type)
+      queryText += ` AND t.code = $${paramIndex}`
+      queryParams.push(type)
+      paramIndex++
     }
+
     if (placement) {
-      query = query.eq('placements.code', placement)
+      queryText += ` AND p.code = $${paramIndex}`
+      queryParams.push(placement)
+      paramIndex++
     }
+
     if (country) {
-      query = query.eq('country_code', country)
+      queryText += ` AND c.country_code = $${paramIndex}`
+      queryParams.push(country)
+      paramIndex++
     }
+
     if (platform) {
-      query = query.eq('platforms.code', platform)
+      queryText += ` AND pl.code = $${paramIndex}`
+      queryParams.push(platform)
+      paramIndex++
     }
+
     if (cloaking && cloaking !== '') {
-      query = query.eq('cloaking', cloaking === 'true')
+      queryText += ` AND c.cloaking = $${paramIndex}`
+      queryParams.push(cloaking === 'true')
+      paramIndex++
     }
-    
-    const { data, error, count } = await query
-    
-    if (error) {
-      console.error('Supabase error:', error)
-      return NextResponse.json({ 
-        success: false,
-        error: error.message 
-      }, { 
-        status: 500, 
-        headers: responseHeaders 
-      })
-    }
-    
+
+    // Сортировка и пагинация
+    queryText += ` ORDER BY c.captured_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`
+    queryParams.push(limit, offset)
+
+    // Получаем данные
+    const { rows: creatives } = await query(queryText, queryParams)
+
+    // Получаем общее количество (для пагинации)
+    const countQuery = queryText.replace(/SELECT.*FROM/, 'SELECT COUNT(*) as total FROM').split('ORDER BY')[0]
+    const { rows: countRows } = await query(countQuery, queryParams.slice(0, -2)) // Убираем LIMIT и OFFSET
+    const total = parseInt(countRows[0]?.total || '0')
+
+    // Форматируем результат
+    const formattedCreatives = creatives.map(creative => ({
+      id: creative.id,
+      title: creative.title,
+      description: creative.description,
+      captured_at: creative.captured_at,
+      format: creative.format_code ? { code: creative.format_code, name: creative.format_name } : null,
+      type: creative.type_code ? { code: creative.type_code, name: creative.type_name } : null,
+      placement: creative.placement_code ? { code: creative.placement_code, name: creative.placement_name } : null,
+      platform: creative.platform_code ? { code: creative.platform_code, name: creative.platform_name } : null,
+      country: creative.country_code ? { code: creative.country_code, name: creative.country_name } : null,
+      cloaking: creative.cloaking,
+      media_url: creative.media_url,
+      thumbnail_url: creative.thumbnail_url,
+      landing_url: creative.landing_url,
+      download_url: creative.download_url,
+      status: creative.status,
+      created_at: creative.created_at,
+      updated_at: creative.updated_at,
+    }))
+
     return NextResponse.json({ 
       success: true,
-      creatives: data || [],
-      total: count || 0,
+      creatives: formattedCreatives,
+      total,
       page,
-      totalPages: Math.ceil((count || 0) / limit)
+      totalPages: Math.ceil(total / limit)
     }, { headers: responseHeaders })
   } catch (error) {
     console.error('API error:', error)

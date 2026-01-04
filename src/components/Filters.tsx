@@ -39,20 +39,34 @@ export default function Filters({ onFiltersChange }: FiltersProps) {
 
   const loadFilterData = async () => {
     try {
+      // Загружаем справочники через новые API endpoints
       const [formatsRes, typesRes, placementsRes, platformsRes, countriesRes] = await Promise.all([
-        getFormats(),
-        getTypes(),
-        getPlacements(),
-        getPlatforms(),
-        getCountriesWithCounts()
+        fetch('/api/references/formats'),
+        fetch('/api/references/types'),
+        fetch('/api/references/placements'),
+        fetch('/api/references/platforms'),
+        fetch('/api/references/countries?withCounts=true')
       ])
 
-      if (formatsRes.data) setFormats(formatsRes.data)
-      if (typesRes.data) setTypes(typesRes.data)
-      if (placementsRes.data) setPlacements(placementsRes.data)
-      if (platformsRes.data) setPlatforms(platformsRes.data)
-      if (countriesRes && Array.isArray(countriesRes)) {
-        setCountries(countriesRes as CountryWithCount[])
+      if (formatsRes.ok) {
+        const result = await formatsRes.json()
+        setFormats(result.data || [])
+      }
+      if (typesRes.ok) {
+        const result = await typesRes.json()
+        setTypes(result.data || [])
+      }
+      if (placementsRes.ok) {
+        const result = await placementsRes.json()
+        setPlacements(result.data || [])
+      }
+      if (platformsRes.ok) {
+        const result = await platformsRes.json()
+        setPlatforms(result.data || [])
+      }
+      if (countriesRes.ok) {
+        const result = await countriesRes.json()
+        setCountries(result.data || [])
       }
     } catch (error) {
       console.error('Error loading filter data:', error)
