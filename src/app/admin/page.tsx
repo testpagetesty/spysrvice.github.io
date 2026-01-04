@@ -753,8 +753,23 @@ export default function AdminPage() {
                   prevCreatives.map(c => c.id === updatedCreative.id ? updatedCreative : c)
                 )
               }
+            } else {
+              // Если API не вернул success, используем данные из result.creative
+              const updatedCreative = { ...selectedCreative, ...result.creative } as Creative
+              setSelectedCreative(updatedCreative)
+              setCreatives(prevCreatives => 
+                prevCreatives.map(c => c.id === updatedCreative.id ? updatedCreative : c)
+              )
             }
-          } catch (error) {
+          } else {
+            // Если запрос не успешен, используем данные из result.creative
+            const updatedCreative = { ...selectedCreative, ...result.creative } as Creative
+            setSelectedCreative(updatedCreative)
+            setCreatives(prevCreatives => 
+              prevCreatives.map(c => c.id === updatedCreative.id ? updatedCreative : c)
+            )
+          }
+        } catch (error) {
             console.error('Error fetching updated creative:', error)
             // Fallback: update local state with the edited value
             const updatedCreative = { ...selectedCreative } as Creative
