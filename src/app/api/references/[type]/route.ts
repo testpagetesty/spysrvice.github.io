@@ -38,19 +38,21 @@ export async function GET(
     }
 
     if (type === 'countries' && withCounts) {
-      // Для стран с количеством креативов
+      // Для стран с количеством креативов - возвращаем ВСЕ страны из таблицы countries
+      // Даже если у них нет креативов (count будет 0)
       const { rows } = await query(`
         SELECT 
           co.code,
           co.name,
           co.created_at,
-          COUNT(c.id) as count
+          COUNT(c.id)::int as count
         FROM countries co
         LEFT JOIN creatives c ON c.country_code = co.code AND c.status = 'published'
         GROUP BY co.code, co.name, co.created_at
         ORDER BY co.name
       `)
       
+      // Возвращаем ВСЕ страны, даже с count = 0
       return NextResponse.json({ 
         data: rows.map(row => ({
           code: row.code,
