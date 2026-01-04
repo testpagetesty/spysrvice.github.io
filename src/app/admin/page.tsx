@@ -1267,21 +1267,12 @@ export default function AdminPage() {
       setPlatforms(platformsData)
       setCountries(countriesData.map((c: any) => ({ id: c.code, code: c.code, name: c.name })))
 
-      // Load creatives через новый API endpoint
-      const creativesRes = await fetch('/api/creatives?page=1&limit=100')
+      // Load creatives через новый API endpoint для админки (все креативы)
+      const creativesRes = await fetch('/api/admin/creatives?page=1&limit=100&status=all')
       if (creativesRes.ok) {
         const creativesResult = await creativesRes.json()
         if (creativesResult.success) {
-          // Преобразуем формат данных для совместимости
-          const formattedCreatives = creativesResult.creatives.map((c: any) => ({
-            ...c,
-            formats: c.format ? { name: c.format.name, code: c.format.code } : null,
-            types: c.type ? { name: c.type.name, code: c.type.code } : null,
-            placements: c.placement ? { name: c.placement.name, code: c.placement.code } : null,
-            platforms: c.platform ? { name: c.platform.name, code: c.platform.code } : null,
-            countries: c.country ? { name: c.country.name } : null
-          }))
-          setCreatives(formattedCreatives)
+          setCreatives(creativesResult.creatives || [])
         } else {
           setCreatives([])
         }
@@ -1354,100 +1345,65 @@ export default function AdminPage() {
   const applyFilters = async () => {
     setLoading(true)
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-      
-      if (!supabaseUrl || !supabaseKey) {
-        // Demo filtering logic here
-        setLoading(false)
-        return
-      }
-
-      // Same filtering logic as main page
-      let url = `${supabaseUrl}/rest/v1/creatives?select=*,formats(name,code),types(name,code),placements(name,code),countries(name),platforms(name,code)&order=created_at.desc`
+      // Используем новый API endpoint для админки
+      const params = new URLSearchParams()
+      params.set('page', '1')
+      params.set('limit', '100')
       
       // Status filtering (most important for admin)
       if (filters.status && filters.status !== 'all') {
-        url += `&status=eq.${filters.status}`
+        params.set('status', filters.status)
+      } else {
+        params.set('status', 'all')
       }
       
-      // Date filtering with UTC
-      if (filters.dateFrom && filters.dateTo) {
-        const fromDateTime = `${filters.dateFrom}T00:00:00Z`
-        const toDateTime = `${filters.dateTo}T23:59:59Z`
-        url += `&and=(captured_at.gte.${fromDateTime},captured_at.lte.${toDateTime})`
-      } else if (filters.dateFrom) {
-        url += `&captured_at=gte.${filters.dateFrom}T00:00:00Z`
-      } else if (filters.dateTo) {
-        url += `&captured_at=lte.${filters.dateTo}T23:59:59Z`
+      // Date filtering
+      if (filters.dateFrom) {
+        params.set('dateFrom', filters.dateFrom)
+      }
+      if (filters.dateTo) {
+        params.set('dateTo', filters.dateTo)
       }
       
-      const params = new URLSearchParams()
-      if (filters.country) {
-        params.append('country_code', `eq.${filters.country}`)
-      }
-      if (filters.cloaking) {
-        params.append('cloaking', `eq.${filters.cloaking === 'true'}`)
-      }
-      
-      // Get IDs for related tables
+      // Other filters
       if (filters.format) {
-        const formatResponse = await fetch(`${supabaseUrl}/rest/v1/formats?code=eq.${filters.format}&select=id`, {
-          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-        })
-        const formatData = await formatResponse.json()
-        if (formatData && formatData.length > 0) {
-          params.append('format_id', `eq.${formatData[0].id}`)
-        }
+        params.set('format', filters.format)
       }
-      
       if (filters.type) {
-        const typeResponse = await fetch(`${supabaseUrl}/rest/v1/types?code=eq.${filters.type}&select=id`, {
-          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-        })
-        const typeData = await typeResponse.json()
-        if (typeData && typeData.length > 0) {
-          params.append('type_id', `eq.${typeData[0].id}`)
-        }
+        params.set('type', filters.type)
       }
-      
       if (filters.placement) {
-        const placementResponse = await fetch(`${supabaseUrl}/rest/v1/placements?code=eq.${filters.placement}&select=id`, {
-          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-        })
-        const placementData = await placementResponse.json()
-        if (placementData && placementData.length > 0) {
-          params.append('placement_id', `eq.${placementData[0].id}`)
-        }
+        params.set('placement', filters.placement)
       }
-      
+      if (filters.country) {
+        params.set('country', filters.country)
+      }
       if (filters.platform) {
-        const platformResponse = await fetch(`${supabaseUrl}/rest/v1/platforms?code=eq.${filters.platform}&select=id`, {
-          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
-        })
-        const platformData = await platformResponse.json()
-        if (platformData && platformData.length > 0) {
-          params.append('platform_id', `eq.${platformData[0].id}`)
+        params.set('platform', filters.platform)
+      }
+      if (filters.cloaking !== null && filters.cloaking !== undefined) {
+        params.set('cloaking', filters.cloaking.toString())
+      }
+
+      console.log('Admin Filter URL:', `/api/admin/creatives?${params.toString()}`)
+
+      const response = await fetch(`/api/admin/creatives?${params.toString()}`)
+      
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success) {
+          setCreatives(result.creatives || [])
+        } else {
+          setCreatives([])
         }
+      } else {
+        console.error('Failed to fetch creatives:', response.status)
+        setCreatives([])
       }
-      
-      if (params.toString()) {
-        url += '&' + params.toString()
-      }
-      
-      url += '&limit=100'
-
-      console.log('Admin Filter URL:', url)
-
-      const response = await fetch(url, {
-        headers: { apikey: supabaseKey }
-      })
-      
-      const data = await response.json()
-      setCreatives(data)
 
     } catch (error) {
       console.error('Error applying filters:', error)
+      setCreatives([])
     }
     setLoading(false)
   }
